@@ -2,69 +2,78 @@ import torch
 from transformer_lens import HookedTransformer
 
 def get_mlp_cache(model: HookedTransformer, input_ids: torch.Tensor, **kwargs):
-    filter_mlp_only = lambda name: "mlp" in name
+    """
+    Retrieves MLP outputs from all layers of the HookedTransformer during a forward pass.
 
-    model.set_use_hook_mlp_in(True)
-    model.reset_hooks()
+    Args:
+        model (HookedTransformer): The transformer model.
+        input_ids (torch.Tensor): The input IDs for the forward pass.
+        kwargs: Additional arguments for the model.
+
+    Returns:
+        tuple: The model output and a dictionary containing the MLP activations.
+    """
+    def filter_mlp_only(name):
+        return "mlp" in name
+
     cache = {}
 
     def forward_cache_hook(act, hook):
-        # Do not detach here
         cache[hook.name] = act
 
+    model.set_use_hook_mlp_in(True)
+    model.reset_hooks()
     model.add_hook(filter_mlp_only, forward_cache_hook)
     output = model(input_ids, **kwargs)
+    
     return output, cache
 
-def gradient_activation_attribution(model, input_ids, neuron_idx, layer=-1, token_idx=0):
+def gradient_activation_attribution(
+    model: HookedTransformer, 
+    input_ids: torch.Tensor, 
+    neuron_idx: int, 
+    layer: int = -1, 
+    token_idx: int = 0
+):
     """
     Computes the Gradient x Activation attribution for a given neuron in a given layer.
-    only works for mlp_output layers for now.
-    
+
     Args:
-    - model: The HookedTransformer model.
-    - layer (L or l in PURE paper): The layer index. Can be negative to index from the last layer.
-    - neuron_idx (k in PURE paper): The neuron index in the given layer.
-    - input_ids: The input IDs for the forward pass.
-    - token_idx: The token index for which the attribution is computed.
-        Note: will still return attributions for all prior tokens, but based on the gradient of the specified token.
-    
+        model (HookedTransformer): The HookedTransformer model.
+        input_ids (torch.Tensor): The input IDs for the forward pass.
+        neuron_idx (int): The neuron index in the given layer.
+        layer (int, optional): The layer index. Can be negative to index from the last layer. Defaults to -1.
+        token_idx (int, optional): The token index for which the attribution is computed. Defaults to 0.
+
     Returns:
-    - attributions: Gradient x Activation attributions for the previous layer.
-        with shape (bacth_size, num_tokens, num_neurons).
-        (R^{L-1} in the PURE paper), where the last dimension in i in the paper (R^{L-1}_i).
+        torch.Tensor: Gradient x Activation attributions with shape (batch_size, num_tokens, num_neurons).
     """
-    if layer < 0:
-        num_layers = model.cfg.n_layers
-        layer = num_layers + layer
+    num_layers = model.cfg.n_layers
+    layer = (num_layers + layer) if layer < 0 else layer
     
-    model.eval()
+    # Check for valid layer index
+    if not 0 <= layer < num_layers:
+        raise ValueError(f"Invalid layer index {layer}. Must be between 0 and {num_layers - 1}.")
+    
     _, cache = get_mlp_cache(model, input_ids)
-    
-    # Get the activation A^L_k of the specified neuron
-    lay_min_1_key = f'blocks.{layer - 1}.hook_mlp_out'
+
+    lay_min_1_key = f'blocks.{layer - 1}.hook_mlp_out' if layer > 0 else None
     lay_key = f'blocks.{layer}.hook_mlp_out'
 
-    activation_L_minus_1 = cache[lay_min_1_key]
+    activation_L_minus_1 = cache[lay_min_1_key] if lay_min_1_key else None
     activation_L = cache[lay_key]
 
-    batch_size = activation_L_minus_1.shape[0]
+    if activation_L_minus_1 is None or activation_L is None:
+        raise ValueError(f"Invalid cache. Layer {layer} or {layer - 1} activations not found.")
 
-    grads = []
-
-    for i in range(batch_size):
-        # Compute the gradient of the output neuron w.r.t. the lower-level activations
-        grad = torch.autograd.grad(
-            activation_L[i, token_idx, neuron_idx],
-            activation_L_minus_1,
-            retain_graph=True
-        )[0]
-        grad = grad[i, :, :]  # Extract the gradient of the relevant neuron
-        grads.append(grad)
-
-    grads = torch.stack(grads, dim=0)
-
-    # Compute Gradient x Activation
+    batch_size, num_tokens, num_neurons = activation_L_minus_1.shape
+    if not 0 <= neuron_idx < num_neurons:
+        raise ValueError(f"Invalid neuron index {neuron_idx}. Must be between 0 and {num_neurons - 1}.")
+    if not 0 <= token_idx < num_tokens:
+        raise ValueError(f"Invalid token index {token_idx}. Must be between 0 and {num_tokens - 1}.")
+    
+    activation_L = activation_L[:, token_idx, neuron_idx]
+    grads = torch.autograd.grad(activation_L.sum(), activation_L_minus_1, retain_graph=True)[0]
     attributions = activation_L_minus_1 * grads
 
     return attributions
