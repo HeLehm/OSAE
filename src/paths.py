@@ -2,18 +2,12 @@ import os
 
 
 def get_data_dir():
-    p = os.path.join(
-        os.path.dirname(os.path.dirname(__file__)),
-        "data"
-    )
+    p = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
     os.makedirs(p, exist_ok=True)
     return p
+
 
 def get_embeddings_cache_dir():
-    p = os.path.join(
-        get_data_dir(),
-        "embeddings_cache"
-    )
+    p = os.path.join(get_data_dir(), "embeddings_cache")
     os.makedirs(p, exist_ok=True)
     return p
-

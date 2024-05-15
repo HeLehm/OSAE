@@ -2,6 +2,7 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
+
 class TiedSparseAutoEncoder(nn.Module):
     def __init__(self, in_features, hidden_dim, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -15,19 +16,18 @@ class TiedSparseAutoEncoder(nn.Module):
         )
         self.activation = nn.ReLU()
 
-    
     def encode(self, x):
         self._normalize_M()
 
         c = self.activation(x @ self.M + self.bias)
         return c
-    
+
     def decode(self, c):
         self._normalize_M()
 
         x_hat = c @ self.M.T
         return x_hat
-    
+
     def _normalize_M(self):
         # row wise normalize M
         self.M.data = nn.functional.normalize(self.M, p=2, dim=0)
@@ -36,8 +36,8 @@ class TiedSparseAutoEncoder(nn.Module):
         c = self.encode(x)
         x_hat = self.decode(c)
         loss, sparsity_loss = self.loss(x, c, x_hat)
-        return x_hat, loss, sparsity_loss 
-    
+        return x_hat, loss, sparsity_loss
+
     def loss(self, x, c, x_hat, l1_coeff=1e-3):
         reconstruction_loss = F.mse_loss(x, x_hat)
         sparsity_loss = l1_coeff * torch.linalg.norm(c, ord=1, dim=-1).mean()

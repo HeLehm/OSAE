@@ -11,7 +11,7 @@ from src.sae import TiedSparseAutoEncoder
 
 def get_ds(args):
     backbone_model = get_backbone(args.model)
-    text_ds = load_dataset(args.text_dataset)['train']
+    text_ds = load_dataset(args.text_dataset)["train"]
 
     ds = ActivationDataset(
         args.layername,
@@ -28,20 +28,19 @@ def get_ds(args):
 
 
 def main(args):
-
     ds = get_ds(args)
 
     sae = TiedSparseAutoEncoder(ds.data.shape[-1], 2 * ds.data.shape[-1])
     sae.to(args.device)
     sae.train()
-    
+
     dl = torch.utils.data.DataLoader(ds, batch_size=32, shuffle=True)
 
     optimizer = torch.optim.Adam(sae.parameters(), lr=1e-3)
 
     for epoch in range(10):
         losses = []
-        for batch in (pbar:=tqdm(dl)):
+        for batch in (pbar := tqdm(dl)):
             optimizer.zero_grad()
             batch = batch.to(args.device)
             _, loss, _ = sae(batch)
@@ -49,14 +48,12 @@ def main(args):
             optimizer.step()
             pbar.set_description(f"Loss: {loss.item():.4f}")
             losses.append(loss.item())
-        print(f"Epoch {epoch} Loss: {sum(losses)/len(losses):.4f}")            
-
-    
-
+        print(f"Epoch {epoch} Loss: {sum(losses)/len(losses):.4f}")
 
 
 if __name__ == "__main__":
     import argparse
+
     parser = argparse.ArgumentParser()
 
     parser.add_argument("--model", type=str, default="EleutherAI/pythia-70m-deduped")

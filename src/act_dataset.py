@@ -11,17 +11,18 @@ from .paths import get_embeddings_cache_dir
 
 from typing import Union
 
+
 class ActivationDataset(Dataset):
     # TODO store max len in path
 
     def __init__(
-            self,
-            layername: str,
-            model: Union[AutoModel, HookedModel],
-            text_dataset: hfDataset,
-            cache_root_dir=None,
-            flatten_sequence=True,
-            **kwargs
+        self,
+        layername: str,
+        model: Union[AutoModel, HookedModel],
+        text_dataset: hfDataset,
+        cache_root_dir=None,
+        flatten_sequence=True,
+        **kwargs,
     ) -> None:
         super().__init__()
 
@@ -32,15 +33,21 @@ class ActivationDataset(Dataset):
         self.flatten_sequence = flatten_sequence
         self.layername = layername
         self.model_name = model.name_or_path if not isinstance(model, str) else model
-        self.text_dataset_name = text_dataset.info.dataset_name + "/" + text_dataset.split._name if not isinstance(text_dataset, str) else text_dataset
+        self.text_dataset_name = (
+            text_dataset.info.dataset_name + "/" + text_dataset.split._name
+            if not isinstance(text_dataset, str)
+            else text_dataset
+        )
 
         if not self.exists():
             self.generate(model, text_dataset, **kwargs)
 
         self.cache_file_name = self.get_cache_file_name()
         self.data_shape = self._get_data_shape(model, text_dataset)
-        self.data = np.memmap(self.cache_file_name, dtype='float32', mode='r', shape=self.data_shape)
-        
+        self.data = np.memmap(
+            self.cache_file_name, dtype="float32", mode="r", shape=self.data_shape
+        )
+
         if self.flatten_sequence:
             self.flattened_data = self.data.reshape(-1, self.data_shape[-1])
 
@@ -53,7 +60,7 @@ class ActivationDataset(Dataset):
 
         model.register_forward_hook_for_name(self.layername)
         model.eval()
-        
+
         return model
 
     @torch.no_grad()
@@ -64,9 +71,8 @@ class ActivationDataset(Dataset):
         batch_size=8,
         num_proc=4,
         max_length=256,
-        device=None
+        device=None,
     ):
-
         model = self._make_model_hooked(model)
 
         def tokenize_function(examples):
@@ -86,7 +92,7 @@ class ActivationDataset(Dataset):
         )
 
         text_dataset = text_dataset.remove_columns(["text", "meta"])
-        text_dataset.set_format(type='torch', columns=['input_ids', 'attention_mask'])
+        text_dataset.set_format(type="torch", columns=["input_ids", "attention_mask"])
 
         if device is not None:
             model.to(device)
@@ -94,24 +100,30 @@ class ActivationDataset(Dataset):
         device = next(model.parameters()).device
 
         dataloader = torch.utils.data.DataLoader(
-            text_dataset,
-            batch_size=batch_size,
-            shuffle=False
+            text_dataset, batch_size=batch_size, shuffle=False
         )
 
         first_batch = next(iter(dataloader))
-        first_batch = {k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in first_batch.items()}
+        first_batch = {
+            k: v.to(device) if isinstance(v, torch.Tensor) else v
+            for k, v in first_batch.items()
+        }
         _, cache = model(**first_batch)
         example_activation = cache[self.layername].detach().cpu()
         activation_shape = example_activation.shape
 
         total_samples = len(text_dataset)
         memmap_shape = (total_samples,) + activation_shape[1:]
-        activations = np.memmap(self.get_cache_file_name(), dtype='float32', mode='w+', shape=memmap_shape)
+        activations = np.memmap(
+            self.get_cache_file_name(), dtype="float32", mode="w+", shape=memmap_shape
+        )
 
         start_idx = 0
         for batch in tqdm(dataloader, desc="Generating Activations"):
-            batch = {k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
+            batch = {
+                k: v.to(device) if isinstance(v, torch.Tensor) else v
+                for k, v in batch.items()
+            }
             _, cache = model(**batch)
             layer_act = cache[self.layername].detach().cpu().numpy()
             end_idx = start_idx + layer_act.shape[0]
@@ -127,18 +139,14 @@ class ActivationDataset(Dataset):
 
     def get_cache_file_name(self):
         return os.path.join(self.get_cache_dir(), self.layername + ".npy")
-    
+
     @torch.no_grad()
     def _get_data_shape(self, model, text_dataset, max_length=256):
         # pass dummy input to model
         model = self._make_model_hooked(model)
         _, cache = model(**model.dummy_inputs)
         example_activation = cache[self.layername].detach().cpu()
-        return (len(text_dataset),max_length, example_activation.shape[-1])
-        
-
-
-        
+        return (len(text_dataset), max_length, example_activation.shape[-1])
 
     def exists(self):
         return os.path.exists(self.get_cache_file_name())
