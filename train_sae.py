@@ -1,4 +1,5 @@
 import torch
+import wandb
 
 from datasets import load_dataset
 from tqdm import tqdm
@@ -7,6 +8,7 @@ from src.paths import get_embeddings_cache_dir
 from src.backbone import get_backbone
 from src.act_dataset import ActivationDataset
 from src.sae import TiedSparseAutoEncoder
+from src.utils import wandb_log
 
 
 def get_ds(args):
@@ -34,6 +36,13 @@ def get_ds(args):
 
 
 def main(args):
+    if args.wandb:
+        wandb.init(
+            project="SAE",
+            entity="NN-Course-Project",
+            config=args
+        )
+
     ds = get_ds(args)
 
     if ds is None:
@@ -44,12 +53,16 @@ def main(args):
 
     sae = TiedSparseAutoEncoder(ds.data.shape[-1], args.R * ds.data.shape[-1])
     print("Model M weight shape:", sae.M.shape)
-    sae.to(args.device)
-    sae.train()
+    wandb_log({"model_M_shape": sae.M.shape})
 
     dl = torch.utils.data.DataLoader(ds, batch_size=args.batch_size, shuffle=True)
 
-    optimizer = torch.optim.Adam(sae.parameters(), lr=args.lr)
+    sae.init_weights(args.init_strategy, dl)
+    sae.to(args.device)
+    sae.train()
+
+    # don't use Adam, it works to fast, so its quite hard to compare the results
+    optimizer = torch.optim.SGD(sae.parameters(), lr=args.lr)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, args.epochs + 1)
 
     for epoch in range(args.epochs):
@@ -68,13 +81,14 @@ def main(args):
                     "sparsity_loss": sparsity_loss.item(),
                 }
             )
+            wandb_log(metrics[-1])
             pbar.set_description(
                 f"Loss: {loss.item():.4f}, Cosine Sim: {cos_sim.item():.4f}"
             )
         scheduler.step()
 
         mean_metrics = {
-            k: sum(m[k] for m in metrics) / len(metrics) for k in metrics[0]
+            "mean_" + k: sum(m[k] for m in metrics) / len(metrics) for k in metrics[0]
         }
         print(f"Epoch {epoch}")
         print(mean_metrics)
@@ -95,6 +109,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--R", type=int, default=2, help="Multiplier for the hidden layer size"
     )
+    parser.add_argument("--init_strategy", type=str, default="xavier")
 
     # training
     parser.add_argument("--batch_size", type=int, default=1024)
@@ -105,6 +120,7 @@ if __name__ == "__main__":
     # misc
     parser.add_argument("--device", type=str, default="mps")
     parser.add_argument("--info", action="store_true")
+    parser.add_argument("--wandb", action="store_true")
 
     args = parser.parse_args()
 

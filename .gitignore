@@ -188,5 +188,7 @@ Temporary Items
 .apdisk
 
 .vscode/
-
+wandb/
 data/
+
+NOTES.md

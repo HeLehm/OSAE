@@ -43,6 +43,19 @@ class TiedSparseAutoEncoder(nn.Module):
         sparsity_loss = l1_coeff * torch.linalg.norm(c, ord=1, dim=-1).mean()
         return reconstruction_loss + sparsity_loss, sparsity_loss
 
+    def init_weights(self, strategy="xavier", data_loader=None):
+        if strategy == "xavier":
+            nn.init.xavier_normal_(self.M)
+            nn.init.normal_(self.bias)
+        elif strategy == "kaiming":
+            nn.init.kaiming_normal_(self.M)
+            nn.init.kaiming_normal_(self.bias)
+        elif strategy == "orthogonal":
+            nn.init.orthogonal_(self.M)
+            nn.init.normal_(self.bias)
+        else:
+            raise ValueError("Invalid strategy")
+
 
 if __name__ == "__main__":
     model = TiedSparseAutoEncoder(128, 512)
