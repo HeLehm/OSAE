@@ -10,16 +10,12 @@ class TiedSparseAutoEncoder(nn.Module):
             torch.randn(in_features, hidden_dim),
             requires_grad=True,
         )
-        self.bias = nn.Parameter(
-            torch.randn(hidden_dim),
-            requires_grad=True,
-        )
         self.activation = nn.ReLU()
 
     def encode(self, x):
         self._normalize_M()
 
-        c = self.activation(x @ self.M + self.bias)
+        c = self.activation(x @ self.M)
         return c
 
     def decode(self, c):
@@ -41,18 +37,13 @@ class TiedSparseAutoEncoder(nn.Module):
     def loss(self, x, c, x_hat, l1_coeff=1e-3):
         reconstruction_loss = F.mse_loss(x, x_hat)
         sparsity_loss = l1_coeff * torch.linalg.norm(c, ord=1, dim=-1).mean()
-        return reconstruction_loss + sparsity_loss, sparsity_loss
+        return reconstruction_loss, sparsity_loss
 
     def init_weights(self, strategy="xavier", data_loader=None):
         if strategy == "xavier":
             nn.init.xavier_normal_(self.M)
-            nn.init.normal_(self.bias)
-        elif strategy == "kaiming":
-            nn.init.kaiming_normal_(self.M)
-            nn.init.kaiming_normal_(self.bias)
         elif strategy == "orthogonal":
             nn.init.orthogonal_(self.M)
-            nn.init.normal_(self.bias)
         else:
             raise ValueError("Invalid strategy")
 

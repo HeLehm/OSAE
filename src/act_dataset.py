@@ -49,7 +49,7 @@ class ActivationDataset(Dataset):
         )
 
         if self.flatten_sequence:
-            self.flattened_data = self.data.reshape(-1, self.data_shape[-1])
+            self.data = self.data.reshape(-1, self.data_shape[-1])
 
         print("Data Shape:", self.data.shape)
 
@@ -169,11 +169,7 @@ class ActivationDataset(Dataset):
         return os.path.exists(self.get_cache_file_name())
 
     def __len__(self):
-        if self.flatten_sequence:
-            return self.flattened_data.shape[0]
         return self.data_shape[0]
 
     def __getitem__(self, idx):
-        if self.flatten_sequence:
-            return torch.tensor(self.flattened_data[idx])
         return torch.tensor(self.data[idx])
