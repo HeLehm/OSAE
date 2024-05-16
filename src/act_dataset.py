@@ -13,8 +13,6 @@ from typing import Union
 
 
 class ActivationDataset(Dataset):
-    # TODO store max len in path
-
     def __init__(
         self,
         layername: str,
@@ -22,6 +20,7 @@ class ActivationDataset(Dataset):
         text_dataset: hfDataset,
         cache_root_dir=None,
         flatten_sequence=True,
+        max_length=128,
         **kwargs,
     ) -> None:
         super().__init__()
@@ -31,6 +30,7 @@ class ActivationDataset(Dataset):
         self.cache_root_dir = cache_root_dir
 
         self.flatten_sequence = flatten_sequence
+        self.max_length = max_length
         self.layername = layername
         self.model_name = model.name_or_path if not isinstance(model, str) else model
         self.text_dataset_name = (
@@ -51,6 +51,8 @@ class ActivationDataset(Dataset):
         if self.flatten_sequence:
             self.flattened_data = self.data.reshape(-1, self.data_shape[-1])
 
+        print("Data Shape:", self.data.shape)
+
     def _make_model_hooked(self, model):
         if isinstance(model, str):
             model = AutoModel.from_pretrained(model)
@@ -70,7 +72,6 @@ class ActivationDataset(Dataset):
         text_dataset: hfDataset,
         batch_size=8,
         num_proc=4,
-        max_length=256,
         device=None,
     ):
         model = self._make_model_hooked(model)
@@ -80,7 +81,7 @@ class ActivationDataset(Dataset):
                 examples["text"],
                 truncation=True,
                 padding="max_length",
-                max_length=max_length,
+                max_length=self.max_length,
             )
             return val
 
@@ -109,8 +110,13 @@ class ActivationDataset(Dataset):
             for k, v in first_batch.items()
         }
         _, cache = model(**first_batch)
-        example_activation = cache[self.layername].detach().cpu()
+        example_activation = cache[self.layername]
+        if isinstance(example_activation, tuple):
+            example_activation = example_activation[0]
+        example_activation = example_activation.detach().cpu()
         activation_shape = example_activation.shape
+
+        print("Generating dataset with activation shape:", activation_shape[1:])
 
         total_samples = len(text_dataset)
         memmap_shape = (total_samples,) + activation_shape[1:]
@@ -125,7 +131,10 @@ class ActivationDataset(Dataset):
                 for k, v in batch.items()
             }
             _, cache = model(**batch)
-            layer_act = cache[self.layername].detach().cpu().numpy()
+            layer_act = cache[self.layername]
+            if isinstance(layer_act, tuple):
+                layer_act = layer_act[0]
+            layer_act = layer_act.detach().cpu().numpy()
             end_idx = start_idx + layer_act.shape[0]
             activations[start_idx:end_idx] = layer_act
             start_idx = end_idx
@@ -133,7 +142,12 @@ class ActivationDataset(Dataset):
         activations.flush()
 
     def get_cache_dir(self):
-        p = os.path.join(self.cache_root_dir, self.model_name, self.text_dataset_name)
+        p = os.path.join(
+            self.cache_root_dir,
+            self.model_name,
+            self.text_dataset_name,
+            str(self.max_length),
+        )
         os.makedirs(p, exist_ok=True)
         return p
 
@@ -141,12 +155,15 @@ class ActivationDataset(Dataset):
         return os.path.join(self.get_cache_dir(), self.layername + ".npy")
 
     @torch.no_grad()
-    def _get_data_shape(self, model, text_dataset, max_length=256):
+    def _get_data_shape(self, model, text_dataset):
         # pass dummy input to model
         model = self._make_model_hooked(model)
         _, cache = model(**model.dummy_inputs)
-        example_activation = cache[self.layername].detach().cpu()
-        return (len(text_dataset), max_length, example_activation.shape[-1])
+        example_activation = cache[self.layername]
+        if isinstance(example_activation, tuple):
+            example_activation = example_activation[0]
+        example_activation = example_activation.detach().cpu()
+        return (len(text_dataset), self.max_length, example_activation.shape[-1])
 
     def exists(self):
         return os.path.exists(self.get_cache_file_name())

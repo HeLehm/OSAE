@@ -32,10 +32,10 @@ class TiedSparseAutoEncoder(nn.Module):
         # row wise normalize M
         self.M.data = nn.functional.normalize(self.M, p=2, dim=0)
 
-    def forward(self, x):
+    def forward(self, x, l1_coeff=1e-3):
         c = self.encode(x)
         x_hat = self.decode(c)
-        loss, sparsity_loss = self.loss(x, c, x_hat)
+        loss, sparsity_loss = self.loss(x, c, x_hat, l1_coeff=l1_coeff)
         return x_hat, loss, sparsity_loss
 
     def loss(self, x, c, x_hat, l1_coeff=1e-3):
