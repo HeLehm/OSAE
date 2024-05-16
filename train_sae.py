@@ -39,7 +39,6 @@ def main(args):
     if args.wandb:
         wandb.init(
             project="SAE",
-            entity="NN-Course-Project",
             config=args
         )
 
