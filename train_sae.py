@@ -9,6 +9,7 @@ from src.backbone import get_backbone
 from src.act_dataset import ActivationDataset
 from src.sae import TiedSparseAutoEncoder
 from src.utils import log_dict, wandb_log
+from src.metrics import DeadNeuronDetector, mean_cosine_similarity
 
 
 def set_seed(seed):
@@ -52,10 +53,12 @@ def get_ds(args):
 def evaluate_sae(sae, dl, device, l1_coeff=1e-3):
     sae.eval()
     metrics = []
-    for batch in tqdm(dl, desc="Evaluating"):
-        batch = batch.to(device)
-        x_hat, reconstruction_loss, sparsity_loss = sae(batch, l1_coeff)
-        cos_sim = torch.nn.functional.cosine_similarity(x_hat, batch).mean()
+    dead_neuron_detector = DeadNeuronDetector(1e-6)
+    for x in tqdm(dl, desc="Evaluating"):
+        x = x.to(device)
+        x_hat, c = sae(x)
+        reconstruction_loss, sparsity_loss = sae.losses(x, c, x_hat, l1_coeff)
+        cos_sim = mean_cosine_similarity(x, x_hat)
         metrics.append(
             {
                 "reconstruction_loss": reconstruction_loss.item(),
@@ -63,9 +66,11 @@ def evaluate_sae(sae, dl, device, l1_coeff=1e-3):
                 "scaled_sparsity_loss": sparsity_loss.item(),
             }
         )
+        dead_neuron_detector.on_batch(c)
     mean_metrics = {
         "mean_" + k: sum(m[k] for m in metrics) / len(metrics) for k in metrics[0]
     }
+    mean_metrics["dead_neurons"] = dead_neuron_detector.on_epoch_end().sum().item()
     return mean_metrics
 
 
@@ -81,8 +86,7 @@ def main(args):
         else:
             raise ValueError("Dataset is None")
 
-    sae = TiedSparseAutoEncoder(ds.data.shape[-1], args.R * ds.data.shape[-1])
-    print("Model M weight shape:", sae.M.shape)
+    sae = TiedSparseAutoEncoder(ds.data.shape[-1], int(args.R * ds.data.shape[-1]))
     log_dict({f"model/M_shape_{i}": v for i, v in enumerate(sae.M.shape)})
 
     dl = torch.utils.data.DataLoader(ds, batch_size=args.batch_size, shuffle=True)
@@ -91,8 +95,8 @@ def main(args):
     sae.to(args.device)
     sae.train()
 
-    # don't use Adam, it works to fast, so its quite hard to compare the results
-    optimizer = torch.optim.AdamW(sae.parameters(), lr=args.lr)
+    # don't use Adam, it works to fast, so its quite hard to compare the results?
+    optimizer = torch.optim.SGD(sae.parameters(), lr=args.lr)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, args.epochs + 1)
 
     for epoch in range(args.epochs):
@@ -103,16 +107,18 @@ def main(args):
                 "before_epoch": epoch,
             }
         )
-        for batch in (pbar := tqdm(dl)):
+        sae.train()
+        for x in (pbar := tqdm(dl)):
             optimizer.zero_grad()
-            batch = batch.to(args.device)
-            x_hat, reconstruction_loss, sparsity_loss = sae(
-                batch, l1_coeff=args.l1_coeff
+            x = x.to(args.device)
+            x_hat, c = sae(x)
+            reconstruction_loss, sparsity_loss = sae.losses(
+                x, c, x_hat, args.l1_coeff
             )
             loss = reconstruction_loss + sparsity_loss
             loss.backward()
             optimizer.step()
-            cos_sim = torch.nn.functional.cosine_similarity(x_hat, batch).mean()
+            cos_sim = mean_cosine_similarity(x, x_hat)
             wandb_log(
                 {
                     "train/reconstruction_loss": reconstruction_loss.item(),
@@ -139,7 +145,7 @@ if __name__ == "__main__":
 
     # model
     parser.add_argument(
-        "--R", type=int, default=2, help="Multiplier for the hidden layer size"
+        "--R", type=float, default=2., help="Multiplier for the hidden layer size"
     )
     parser.add_argument("--init_strategy", type=str, default="xavier")
 

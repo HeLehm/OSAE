@@ -28,13 +28,12 @@ class TiedSparseAutoEncoder(nn.Module):
         # row wise normalize M
         self.M.data = nn.functional.normalize(self.M, p=2, dim=0)
 
-    def forward(self, x, l1_coeff=1e-3):
+    def forward(self, x):
         c = self.encode(x)
         x_hat = self.decode(c)
-        loss, sparsity_loss = self.loss(x, c, x_hat, l1_coeff=l1_coeff)
-        return x_hat, loss, sparsity_loss
+        return x_hat, c
 
-    def loss(self, x, c, x_hat, l1_coeff=1e-3):
+    def losses(self, x, c, x_hat, l1_coeff=1e-3):
         reconstruction_loss = F.mse_loss(x, x_hat)
         sparsity_loss = l1_coeff * torch.linalg.norm(c, ord=1, dim=-1).mean()
         return reconstruction_loss, sparsity_loss
