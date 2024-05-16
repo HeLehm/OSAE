@@ -49,9 +49,9 @@ class ActivationDataset(Dataset):
         )
 
         if self.flatten_sequence:
-            self.data = self.data.reshape(-1, self.data_shape[-1])
+            self.flattened_data = self.data.reshape(-1, self.data_shape[-1])
 
-        print("Data Shape:", self.data.shape)
+        print("Data Shape:", self.data.shape if not self.flatten_sequence else self.flattened_data.shape)
 
     def _make_model_hooked(self, model):
         if isinstance(model, str):
@@ -169,7 +169,11 @@ class ActivationDataset(Dataset):
         return os.path.exists(self.get_cache_file_name())
 
     def __len__(self):
+        if self.flatten_sequence:
+            return self.flattened_data.shape[0]
         return self.data_shape[0]
 
     def __getitem__(self, idx):
+        if self.flatten_sequence:
+            return torch.tensor(self.flattened_data[idx])
         return torch.tensor(self.data[idx])
