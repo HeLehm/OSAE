@@ -32,11 +32,10 @@ class DeadNeuronDetector:
         else:
             self.dead_neurons_counter += mask
 
-
     def on_epoch_end(self) -> Dict[int, float]:
         """
         Return a dict, where keys are indices of neurons
-        and keys are the proportion of batches, where the neuron was dead. 
+        and keys are the proportion of batches, where the neuron was dead.
         I.e. if values is 1.0 for a neuron, it was dead in all batches.
         NOTE: resets the instance.
         """

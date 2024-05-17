@@ -29,7 +29,7 @@ def get_ds(args):
     backbone_model = get_backbone(args.model)
 
     if args.info:
-        for name, module in backbone_model.named_modules():
+        for name, _ in backbone_model.named_modules():
             print(name)
         return None
 
@@ -73,7 +73,7 @@ def evaluate_sae(sae, dl, device, l1_coeff=1e-3):
     }
     _, num_dead = dead_neuron_detector.on_epoch_end()
     mean_metrics["num_dead_neurons"] = num_dead
-    
+
     return mean_metrics
 
 
@@ -99,7 +99,9 @@ def main(args):
 
     dl = torch.utils.data.DataLoader(ds, batch_size=args.batch_size, shuffle=True)
 
-    sae.init_weights(args.init_strategy, dl)
+    sae.init_weights_D_(args.init_strategy_D)
+    if not args.tied:
+        sae.init_weights_M_(args.init_strategy_M)
     sae.to(args.device)
     sae.train()
 
@@ -156,7 +158,13 @@ if __name__ == "__main__":
     parser.add_argument(
         "--R", type=float, default=2.0, help="Multiplier for the hidden layer size"
     )
-    parser.add_argument("--init_strategy", type=str, default="xavier")
+    parser.add_argument(
+        "--init_strategy_M",
+        type=str,
+        default="xavier",
+        help="Note: will be ignored if tied is True",
+    )
+    parser.add_argument("--init_strategy_D", type=str, default="xavier")
 
     # training
     parser.add_argument("--batch_size", type=int, default=2048)

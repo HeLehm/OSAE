@@ -7,6 +7,7 @@ def wandb_log(data):
     except wandb.errors.Error:
         pass
 
+
 def wandb_config_log(data):
     try:
         wandb.config.update(data)
@@ -21,4 +22,3 @@ def log_dict(data, config=False):
         wandb_config_log(data)
     for k, v in data.items():
         print(f"{k}: {v}")
-
