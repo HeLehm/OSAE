@@ -128,6 +128,7 @@ def main(args):
             cos_sim = mean_cosine_similarity(x, x_hat)
             wandb_log(
                 {
+                    "train/loss": loss.item(),
                     "train/reconstruction_loss": reconstruction_loss.item(),
                     "train/reconstruction_cos_sim": cos_sim.item(),
                     "train/sparsity_loss": sparsity_loss.item(),
