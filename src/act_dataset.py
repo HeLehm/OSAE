@@ -51,7 +51,10 @@ class ActivationDataset(Dataset):
         if self.flatten_sequence:
             self.flattened_data = self.data.reshape(-1, self.data_shape[-1])
 
-        print("Data Shape:", self.data.shape if not self.flatten_sequence else self.flattened_data.shape)
+        print(
+            "Data Shape:",
+            self.data.shape if not self.flatten_sequence else self.flattened_data.shape,
+        )
 
     def _make_model_hooked(self, model):
         if isinstance(model, str):

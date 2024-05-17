@@ -95,8 +95,9 @@ def main(args):
     sae.to(args.device)
     sae.train()
 
-    # don't use Adam, it works to fast, so its quite hard to compare the results?
-    optimizer = torch.optim.SGD(sae.parameters(), lr=args.lr)
+    # in: [Interim research report] Taking features out of superposition with sparse autoencoders
+    # lr = 0.001, batch_size = 256, optim = Adam
+    optimizer = torch.optim.Adam(sae.parameters(), lr=args.lr)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, args.epochs + 1)
 
     for epoch in range(args.epochs):
@@ -112,9 +113,7 @@ def main(args):
             optimizer.zero_grad()
             x = x.to(args.device)
             x_hat, c = sae(x)
-            reconstruction_loss, sparsity_loss = sae.losses(
-                x, c, x_hat, args.l1_coeff
-            )
+            reconstruction_loss, sparsity_loss = sae.losses(x, c, x_hat, args.l1_coeff)
             loss = reconstruction_loss + sparsity_loss
             loss.backward()
             optimizer.step()
@@ -145,13 +144,13 @@ if __name__ == "__main__":
 
     # model
     parser.add_argument(
-        "--R", type=float, default=2., help="Multiplier for the hidden layer size"
+        "--R", type=float, default=2.0, help="Multiplier for the hidden layer size"
     )
     parser.add_argument("--init_strategy", type=str, default="xavier")
 
     # training
     parser.add_argument("--batch_size", type=int, default=2048)
-    parser.add_argument("--lr", type=float, default=1e-3)
+    parser.add_argument("--lr", type=float, default=0.001)
     parser.add_argument("--epochs", type=int, default=10)
     parser.add_argument("--l1_coeff", type=float, default=1e-3)
 
