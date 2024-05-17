@@ -171,7 +171,7 @@ if __name__ == "__main__":
     parser.add_argument("--lr", type=float, default=0.001)
     parser.add_argument("--epochs", type=int, default=10)
     parser.add_argument("--l1", type=float, default=1e-3)
-    parser.add_argument("--tied", action="store_true")
+    parser.add_argument("--tied", type=int, default=0, help="Tie the weights of the model")
 
     # misc
     parser.add_argument("--device", type=str, default="mps")
@@ -180,6 +180,7 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=42)
 
     args = parser.parse_args()
+    args.tied = bool(args.tied)
 
     set_seed(args.seed)
     main(args)
