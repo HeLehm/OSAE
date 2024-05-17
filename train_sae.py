@@ -49,37 +49,9 @@ def get_ds(args):
     return ds
 
 
-@torch.no_grad()
-def evaluate_sae(sae, dl, device, l1_coeff=1e-3):
-    sae.eval()
-    metrics = []
-    dead_neuron_detector = DeadNeuronDetector()
-    for x in tqdm(dl, desc="Evaluating"):
-        x = x.to(device)
-        x_hat, c = sae(x)
-        reconstruction_loss, sparsity_loss = sae.losses(x, c, x_hat, l1_coeff)
-        cos_sim = mean_cosine_similarity(x, x_hat)
-        metrics.append(
-            {
-                "reconstruction_loss": reconstruction_loss.item(),
-                "reconstruction_cos_sim": cos_sim.item(),
-                "scaled_sparsity_loss": sparsity_loss.item(),
-                "unscaled_sparsity_loss": sparsity_loss.item() / l1_coeff,
-            }
-        )
-        dead_neuron_detector.on_batch(c)
-    mean_metrics = {
-        "mean_" + k: sum(m[k] for m in metrics) / len(metrics) for k in metrics[0]
-    }
-    _, num_dead = dead_neuron_detector.on_epoch_end()
-    mean_metrics["num_dead_neurons"] = num_dead
-
-    return mean_metrics
-
-
 def main(args):
     if args.wandb != "":
-        wandb.init(project=args.wandb, config=args)
+        wandb.init(project=args.wandb, config=args, entity="bschergen")
 
     ds = get_ds(args)
 
@@ -110,14 +82,9 @@ def main(args):
     optimizer = torch.optim.Adam(sae.parameters(), lr=args.lr)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, args.epochs + 1)
 
+    dead_neuron_detector = DeadNeuronDetector()
+
     for epoch in range(args.epochs):
-        eval_metrics = evaluate_sae(sae, dl, args.device, l1_coeff=args.l1)
-        log_dict(
-            {
-                **{f"eval/{k}": v for k, v in eval_metrics.items()},
-                "before_epoch": epoch,
-            }
-        )
         sae.train()
         for x in (pbar := tqdm(dl)):
             optimizer.zero_grad()
@@ -127,7 +94,10 @@ def main(args):
             loss = reconstruction_loss + sparsity_loss
             loss.backward()
             optimizer.step()
+
+            dead_neuron_detector.on_batch(c)
             cos_sim = mean_cosine_similarity(x, x_hat)
+
             wandb_log(
                 {
                     "train/loss": loss.item(),
@@ -140,6 +110,15 @@ def main(args):
             pbar.set_description(
                 f"Loss: {loss.item():.4f}, Cosine Sim: {cos_sim.item():.4f}"
             )
+
+        _, num_dead = dead_neuron_detector.on_epoch_end()
+        log_dict(
+            {
+                "num_dead_neurons": num_dead,
+                "after_epoch": epoch,
+            }
+        )
+
         scheduler.step()
 
 
@@ -171,7 +150,9 @@ if __name__ == "__main__":
     parser.add_argument("--lr", type=float, default=0.001)
     parser.add_argument("--epochs", type=int, default=10)
     parser.add_argument("--l1", type=float, default=1e-3)
-    parser.add_argument("--tied", type=int, default=0, help="Tie the weights of the model")
+    parser.add_argument(
+        "--tied", type=int, default=0, help="Tie the weights of the model"
+    )
 
     # misc
     parser.add_argument("--device", type=str, default="mps")

@@ -32,7 +32,7 @@ class DeadNeuronDetector:
         else:
             self.dead_neurons_counter += mask
 
-    def on_epoch_end(self) -> Dict[int, float]:
+    def on_epoch_end(self, reset=True) -> Dict[int, float]:
         """
         Return a dict, where keys are indices of neurons
         and keys are the proportion of batches, where the neuron was dead.
@@ -40,7 +40,8 @@ class DeadNeuronDetector:
         NOTE: resets the instance.
         """
         dead_neurons = self.dead_neurons_counter / self.sample_counter
-        self.reset()
+        if reset:
+            self.reset()
 
         indices = dead_neurons.argsort(descending=True)
         values = dead_neurons[indices]
@@ -53,5 +54,5 @@ class DeadNeuronDetector:
         """
         Reset the mask of dead neurons.
         """
-        self.dead_neurons = None
+        self.dead_neurons_counter = None
         self.sample_counter = 0
