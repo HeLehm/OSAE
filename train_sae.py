@@ -78,8 +78,8 @@ def evaluate_sae(sae, dl, device, l1_coeff=1e-3):
 
 
 def main(args):
-    if args.wandb:
-        wandb.init(project="SAE", config=args)
+    if args.wandb != "":
+        wandb.init(project=args.wandb, config=args)
 
     ds = get_ds(args)
 
@@ -167,7 +167,7 @@ if __name__ == "__main__":
     # misc
     parser.add_argument("--device", type=str, default="mps")
     parser.add_argument("--info", action="store_true")
-    parser.add_argument("--wandb", action="store_true")
+    parser.add_argument("--wandb", type=str, default="", help="wandb project name")
     parser.add_argument("--seed", type=int, default=42)
 
     args = parser.parse_args()
