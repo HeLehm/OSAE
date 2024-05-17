@@ -71,7 +71,9 @@ def evaluate_sae(sae, dl, device, l1_coeff=1e-3):
     mean_metrics = {
         "mean_" + k: sum(m[k] for m in metrics) / len(metrics) for k in metrics[0]
     }
-    mean_metrics["dead_neurons"] = dead_neuron_detector.on_epoch_end().sum().item()
+    _, num_dead = dead_neuron_detector.on_epoch_end()
+    mean_metrics["num_dead_neurons"] = num_dead
+    
     return mean_metrics
 
 
@@ -90,10 +92,10 @@ def main(args):
     sae = SparseAutoEncoder(
         in_features=ds.data.shape[-1],
         hidden_dim=int(args.R * ds.data.shape[-1]),
-        tied=False,
+        tied=args.tied,
         bias=True,
     )
-    log_dict({f"model/M_shape_{i}": v for i, v in enumerate(sae.M.shape)})
+    log_dict({f"model/M_shape_{i}": v for i, v in enumerate(sae.M.shape)}, config=True)
 
     dl = torch.utils.data.DataLoader(ds, batch_size=args.batch_size, shuffle=True)
 
@@ -160,6 +162,7 @@ if __name__ == "__main__":
     parser.add_argument("--lr", type=float, default=0.001)
     parser.add_argument("--epochs", type=int, default=10)
     parser.add_argument("--l1", type=float, default=1e-3)
+    parser.add_argument("--tied", action="store_true")
 
     # misc
     parser.add_argument("--device", type=str, default="mps")
