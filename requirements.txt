@@ -1,1 +1,5 @@
-git+https://github.com/neelnanda-io/TransformerLens
+torch
+transformers
+datasets
+wandb
+tqdm
