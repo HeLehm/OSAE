@@ -3,8 +3,14 @@ from torch import nn
 from torch.nn import functional as F
 
 
-class TiedSparseAutoEncoder(nn.Module):
-    def __init__(self, in_features, hidden_dim, bias=True, *args, **kwargs) -> None:
+class SparseAutoEncoder(nn.Module):
+    def __init__(
+            self,
+            in_features,
+            hidden_dim,
+            tied=True,
+            bias=True, *args, **kwargs
+    ) -> None:
         super().__init__(*args, **kwargs)
         self.M = nn.Parameter(
             torch.randn(in_features, hidden_dim),
@@ -12,10 +18,24 @@ class TiedSparseAutoEncoder(nn.Module):
         )
         self.activation = nn.ReLU()
 
+        if tied:
+            self.register_parameter("_D", None)
+        else:
+            self._D = nn.Parameter(
+                torch.randn(hidden_dim, in_features),
+                requires_grad=True,
+            )
+
         if bias:
             self.bias = nn.Parameter(torch.randn(hidden_dim), requires_grad=True)
         else:
             self.register_parameter("bias", None)
+        
+    @property
+    def D(self):
+        if self._D is None:
+            return self.M.T
+        return self._D
 
     def encode(self, x):
         """
@@ -23,7 +43,7 @@ class TiedSparseAutoEncoder(nn.Module):
         x: (batch_size, in_features)
         return: (batch_size, hidden_dim)
         """
-        self._normalize_M()
+        self._normalize_D()
 
         c = x @ self.M
         if self.bias is not None:
@@ -38,20 +58,21 @@ class TiedSparseAutoEncoder(nn.Module):
         c: (batch_size, hidden_dim)
         return: (batch_size, in_features)
         """
-        self._normalize_M()
+        self._normalize_D()
 
-        x_hat = c @ self.M.T
+        x_hat = c @ self.D
         return x_hat
 
-    def _normalize_M(self):
+    def _normalize_D(self):
         """
-        Normalize the decoder matrix M.
+        Normalize the decoder matrix D.
+        NOTE: if tied M.T is D.
 
-        M.T is the decoder matrix, also called dictionary D,
-        which is a h (in_features) x J (hidden_dim) decoder matrix (no bias).
-        M.T (D) is normalized by column i.e. the learned features are normalized.
+        The decoder Matrix D is a J (hidden_dim) x h (in_features) matrix (no bias).
+        D can be M.T if tied.
+        D is normalized by column i.e. the learned features are normalized.
         """
-        self.M.data = F.normalize(self.M, p=2, dim=0)
+        self.D.data = F.normalize(self.D, p=2, dim=-1)
 
     def forward(self, x):
         """
@@ -83,7 +104,7 @@ class TiedSparseAutoEncoder(nn.Module):
 
 
 if __name__ == "__main__":
-    model = TiedSparseAutoEncoder(128, 512)
+    model = SparseAutoEncoder(128, 512)
     x = torch.randn(32, 128)
     c = model.encode(x)
     x_hat = model.decode(c)

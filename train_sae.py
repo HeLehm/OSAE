@@ -7,7 +7,7 @@ from tqdm import tqdm
 from src.paths import get_embeddings_cache_dir
 from src.backbone import get_backbone
 from src.act_dataset import ActivationDataset
-from src.sae import TiedSparseAutoEncoder
+from src.sae import SparseAutoEncoder
 from src.utils import log_dict, wandb_log
 from src.metrics import DeadNeuronDetector, mean_cosine_similarity
 
@@ -53,7 +53,7 @@ def get_ds(args):
 def evaluate_sae(sae, dl, device, l1_coeff=1e-3):
     sae.eval()
     metrics = []
-    dead_neuron_detector = DeadNeuronDetector(1e-6)
+    dead_neuron_detector = DeadNeuronDetector()
     for x in tqdm(dl, desc="Evaluating"):
         x = x.to(device)
         x_hat, c = sae(x)
@@ -62,8 +62,9 @@ def evaluate_sae(sae, dl, device, l1_coeff=1e-3):
         metrics.append(
             {
                 "reconstruction_loss": reconstruction_loss.item(),
-                "cos_sim": cos_sim.item(),
+                "reconstruction_cos_sim": cos_sim.item(),
                 "scaled_sparsity_loss": sparsity_loss.item(),
+                "unscaled_sparsity_loss": sparsity_loss.item() / l1_coeff,
             }
         )
         dead_neuron_detector.on_batch(c)
@@ -86,7 +87,12 @@ def main(args):
         else:
             raise ValueError("Dataset is None")
 
-    sae = TiedSparseAutoEncoder(ds.data.shape[-1], int(args.R * ds.data.shape[-1]))
+    sae = SparseAutoEncoder(
+        in_features=ds.data.shape[-1],
+        hidden_dim=int(args.R * ds.data.shape[-1]),
+        tied=False,
+        bias=True,
+    )
     log_dict({f"model/M_shape_{i}": v for i, v in enumerate(sae.M.shape)})
 
     dl = torch.utils.data.DataLoader(ds, batch_size=args.batch_size, shuffle=True)
@@ -101,7 +107,7 @@ def main(args):
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, args.epochs + 1)
 
     for epoch in range(args.epochs):
-        eval_metrics = evaluate_sae(sae, dl, args.device, l1_coeff=args.l1_coeff)
+        eval_metrics = evaluate_sae(sae, dl, args.device, l1_coeff=args.l1)
         log_dict(
             {
                 **{f"eval/{k}": v for k, v in eval_metrics.items()},
@@ -113,7 +119,7 @@ def main(args):
             optimizer.zero_grad()
             x = x.to(args.device)
             x_hat, c = sae(x)
-            reconstruction_loss, sparsity_loss = sae.losses(x, c, x_hat, args.l1_coeff)
+            reconstruction_loss, sparsity_loss = sae.losses(x, c, x_hat, args.l1)
             loss = reconstruction_loss + sparsity_loss
             loss.backward()
             optimizer.step()
@@ -121,8 +127,9 @@ def main(args):
             wandb_log(
                 {
                     "train/reconstruction_loss": reconstruction_loss.item(),
-                    "train/cos_sim": cos_sim.item(),
+                    "train/reconstruction_cos_sim": cos_sim.item(),
                     "train/sparsity_loss": sparsity_loss.item(),
+                    "train/unscaled_sparsity_loss": sparsity_loss.item() / args.l1,
                 }
             )
             pbar.set_description(
@@ -152,7 +159,7 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", type=int, default=2048)
     parser.add_argument("--lr", type=float, default=0.001)
     parser.add_argument("--epochs", type=int, default=10)
-    parser.add_argument("--l1_coeff", type=float, default=1e-3)
+    parser.add_argument("--l1", type=float, default=1e-3)
 
     # misc
     parser.add_argument("--device", type=str, default="mps")
