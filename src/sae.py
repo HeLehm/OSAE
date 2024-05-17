@@ -32,7 +32,7 @@ class SparseAutoEncoder(nn.Module):
             self.register_parameter("bias", None)
         
     @property
-    def D(self):
+    def D(self) -> nn.Parameter:
         if self._D is None:
             return self.M.T
         return self._D
@@ -43,7 +43,7 @@ class SparseAutoEncoder(nn.Module):
         x: (batch_size, in_features)
         return: (batch_size, hidden_dim)
         """
-        self._normalize_D()
+        self.normalize_D()
 
         c = x @ self.M
         if self.bias is not None:
@@ -58,12 +58,12 @@ class SparseAutoEncoder(nn.Module):
         c: (batch_size, hidden_dim)
         return: (batch_size, in_features)
         """
-        self._normalize_D()
+        self.normalize_D()
 
         x_hat = c @ self.D
         return x_hat
 
-    def _normalize_D(self):
+    def normalize_D(self):
         """
         Normalize the decoder matrix D.
         NOTE: if tied M.T is D.
@@ -72,7 +72,8 @@ class SparseAutoEncoder(nn.Module):
         D can be M.T if tied.
         D is normalized by column i.e. the learned features are normalized.
         """
-        self.D.data = F.normalize(self.D, p=2, dim=-1)
+        with torch.no_grad():
+            self.D.data.div_(torch.linalg.norm(self.D, ord=2, dim=0) + 1e-8)
 
     def forward(self, x):
         """
@@ -105,9 +106,9 @@ class SparseAutoEncoder(nn.Module):
 
 if __name__ == "__main__":
     model = SparseAutoEncoder(128, 512)
+    model.init_weights(strategy="orthogonal")  # Ensure weights are initialized
+    
     x = torch.randn(32, 128)
-    c = model.encode(x)
-    x_hat = model.decode(c)
-    print(x_hat.shape)
-    diff = x - x_hat
-    print(diff.abs().mean())
+    x_hat, c = model(x)
+    reconstruction_loss, sparsity_loss = model.losses(x, c, x_hat)
+    print(f'Reconstruction Loss: {reconstruction_loss.item()}, Sparsity Loss: {sparsity_loss.item()}')
