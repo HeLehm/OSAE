@@ -9,7 +9,10 @@ from src.backbone import get_backbone
 from src.act_dataset import ActivationDataset
 from src.sae import SparseAutoEncoder
 from src.utils import log_dict, wandb_log
-from src.metrics import DeadNeuronDetector, mean_cosine_similarity
+from src.metrics import (
+    mean_cosine_similarity,
+    SlidingWindowDeadNeuronTracker,
+)
 
 
 def set_seed(seed):
@@ -82,9 +85,11 @@ def main(args):
     optimizer = torch.optim.Adam(sae.parameters(), lr=args.lr)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, args.epochs + 1)
 
-    dead_neuron_detector = DeadNeuronDetector()
+    dead_neuron_detector = SlidingWindowDeadNeuronTracker(len(dl), sae.M.shape[1])
 
-    for epoch in range(args.epochs):
+    steps = 0
+
+    for _ in range(args.epochs):
         sae.train()
         for x in (pbar := tqdm(dl)):
             optimizer.zero_grad()
@@ -94,30 +99,31 @@ def main(args):
             loss = reconstruction_loss + sparsity_loss
             loss.backward()
             optimizer.step()
+            steps += args.batch_size
 
-            dead_neuron_detector.on_batch(c)
+            dead_stats = dead_neuron_detector.on_batch(c)
+            num_dead = (dead_stats == 1.0).sum().item()
+
             cos_sim = mean_cosine_similarity(x, x_hat)
 
             wandb_log(
                 {
+                    "train/dead_neurons_stats@0.75": dead_stats.quantile(0.75).item(),
+                    "train/dead_neurons_stats@0.5": dead_stats.quantile(0.5).item(),
+                    "train/dead_neurons_stats@0.25": dead_stats.quantile(0.25).item(),
+                    "train/num_dead_neurons": num_dead,
                     "train/loss": loss.item(),
                     "train/reconstruction_loss": reconstruction_loss.item(),
                     "train/reconstruction_cos_sim": cos_sim.item(),
                     "train/sparsity_loss": sparsity_loss.item(),
                     "train/unscaled_sparsity_loss": sparsity_loss.item() / args.l1,
+                    "train/lr": scheduler.get_last_lr()[0],
+                    "train/steps": steps,
                 }
             )
             pbar.set_description(
                 f"Loss: {loss.item():.4f}, Cosine Sim: {cos_sim.item():.4f}"
             )
-
-        _, num_dead = dead_neuron_detector.on_epoch_end()
-        log_dict(
-            {
-                "num_dead_neurons": num_dead,
-                "after_epoch": epoch,
-            }
-        )
 
         scheduler.step()
 
