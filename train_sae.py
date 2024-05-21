@@ -101,17 +101,16 @@ def main(args):
             optimizer.step()
             steps += args.batch_size
 
-            dead_stats = dead_neuron_detector.on_batch(c)
-            num_dead = (dead_stats == 1.0).sum().item()
+            neuron_inactivity_periods = dead_neuron_detector.on_batch(c)
 
             cos_sim = mean_cosine_similarity(x, x_hat)
 
             wandb_log(
                 {
-                    "train/dead_neurons_stats@0.75": dead_stats.quantile(0.75).item(),
-                    "train/dead_neurons_stats@0.5": dead_stats.quantile(0.5).item(),
-                    "train/dead_neurons_stats@0.25": dead_stats.quantile(0.25).item(),
-                    "train/num_dead_neurons": num_dead,
+                    "train/neuron_inactivity_periods@0.75": neuron_inactivity_periods.quantile(0.75).item(),
+                    "train/neuron_inactivity_periods@0.5": neuron_inactivity_periods.quantile(0.5).item(),
+                    "train/neuron_inactivity_periods@0.25": neuron_inactivity_periods.quantile(0.25).item(),
+                    "train/num_dead_neurons": (neuron_inactivity_periods == 1.0).sum().item(),
                     "train/loss": loss.item(),
                     "train/reconstruction_loss": reconstruction_loss.item(),
                     "train/reconstruction_cos_sim": cos_sim.item(),
