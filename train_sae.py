@@ -196,11 +196,11 @@ if __name__ == "__main__":
     # training
     parser.add_argument("--batch_size", type=int, default=2048)
     parser.add_argument("--lr", type=float, default=0.001)
-    parser.add_argument("--epochs", type=int, default=10)
+    parser.add_argument("--epochs", type=int, default=30)
     # losses
     parser.add_argument("--l1", type=float, default=1e-3)
     # only applicable for orthogonal
-    parser.add_argument("--shear_l1", type=float, default=1e-3)
+    parser.add_argument("--shear_l1", type=float, default=0.0)
 
     # misc
     parser.add_argument("--device", type=str, default="mps")
