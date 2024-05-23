@@ -84,20 +84,6 @@ class SparseAutoEncoder(nn.Module):
         x_hat = self.decode(c)
         return x_hat, c
 
-    def losses(
-        self,
-        x: torch.Tensor,
-        c: torch.Tensor,
-        x_hat: torch.Tensor,
-        l1_coeff: float = 1e-3,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """
-        Compute the reconstruction and sparsity losses.
-        """
-        reconstruction_loss = F.mse_loss(x, x_hat)
-        sparsity_loss = l1_coeff * torch.linalg.norm(c, ord=1, dim=-1).mean()
-        return reconstruction_loss, sparsity_loss
-
     def init_weights_D_(self, strategy: str):
         self._init_weight_(self.D, strategy)
 

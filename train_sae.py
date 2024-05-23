@@ -1,4 +1,6 @@
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
 import wandb
 
 from datasets import load_dataset
@@ -77,6 +79,7 @@ def main(args):
     sae.init_weights_D_(args.init_strategy_D)
     if not args.tied:
         sae.init_weights_M_(args.init_strategy_M)
+
     sae.to(args.device)
     sae.train()
 
@@ -94,9 +97,14 @@ def main(args):
         for x in (pbar := tqdm(dl)):
             optimizer.zero_grad()
             x = x.to(args.device)
+
             x_hat, c = sae(x)
-            reconstruction_loss, sparsity_loss = sae.losses(x, c, x_hat, args.l1)
+
+            reconstruction_loss = F.mse_loss(x, x_hat)
+            unscaled_sparsity_loss= torch.linalg.norm(c, ord=1, dim=-1).mean()
+            sparsity_loss = args.l1 * unscaled_sparsity_loss
             loss = reconstruction_loss + sparsity_loss
+
             loss.backward()
             optimizer.step()
             steps += args.batch_size
