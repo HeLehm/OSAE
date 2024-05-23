@@ -107,8 +107,7 @@ def main(args):
                 metrics.update(
                     {
                         "train/unscaled_shear_loss": shear_loss.item(),
-                        "train/scaled_shear_loss": shear_loss.item()
-                        * args.shear_l1,
+                        "train/scaled_shear_loss": shear_loss.item() * args.shear_l1,
                     }
                 )
                 if args.shear_l1 > 0:
@@ -183,13 +182,12 @@ if __name__ == "__main__":
     )
     # only applicable for vanilla
     parser.add_argument(
-        "--tied", type=int, default=0, help="Tie the weights of the model"
+        "--tied", action="store_true", help="Tie the weights of the model"
     )
     # only applicable for orthogonal
     parser.add_argument(
         "--allow_shear",
-        type=int,
-        default=0,
+        action="store_true",
         help="Allow shear in the decoder matrix",
     )
 
@@ -208,10 +206,6 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=42)
 
     args = parser.parse_args()
-
-    # convert to bool (easier to use in wandb sweep if these are ints)
-    args.tied = bool(args.tied)
-    args.allow_shear = bool(args.allow_shear)
 
     set_seed(args.seed)
     main(args)
