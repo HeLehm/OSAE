@@ -35,6 +35,7 @@ class OrthogonalSAE(torch.nn.Module):
     learned representations maintain certain orthogonal properties.
     """
 
+    # TODO make tied=True work
     def __init__(
         self, in_features, hidden_dim, bias=True, allow_shear=True, **kwargs
     ) -> None:
@@ -44,7 +45,7 @@ class OrthogonalSAE(torch.nn.Module):
                 "The hidden dimension should either be the same as the input dimension or twice as large"
             )
 
-        super().__init__(**kwargs)
+        super().__init__()
         self.M = torch.nn.Parameter(
             torch.randn(in_features, hidden_dim),
             requires_grad=True,
