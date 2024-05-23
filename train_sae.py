@@ -103,16 +103,16 @@ def main(args):
             shear_loss = None
             # only aplicable for orthogonal
             if hasattr(sae, "shear_param") and sae.shear_param is not None:
-                shear_loss = sae.shear_param.abs().mean()
+                shear_loss = torch.linalg.norm(sae.shear_param, ord=1)
                 metrics.update(
                     {
                         "train/unscaled_shear_loss": shear_loss.item(),
                         "train/scaled_shear_loss": shear_loss.item()
-                        * args.shear_loss_mult,
+                        * args.shear_l1,
                     }
                 )
-                if args.shear_loss_mult > 0:
-                    loss += args.shear_loss_mult * shear_loss
+                if args.shear_l1 > 0:
+                    loss += args.shear_l1 * shear_loss
 
             loss.backward()
             optimizer.step()
@@ -200,7 +200,7 @@ if __name__ == "__main__":
     # losses
     parser.add_argument("--l1", type=float, default=1e-3)
     # only applicable for orthogonal
-    parser.add_argument("--shear_loss_mult", type=float, default=1e-3)
+    parser.add_argument("--shear_l1", type=float, default=1e-3)
 
     # misc
     parser.add_argument("--device", type=str, default="mps")
