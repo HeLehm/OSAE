@@ -1,14 +1,11 @@
 from typing import Tuple
 import torch
 from torch import nn
-from torch.nn import functional as F
 
 
 class SparseAutoEncoder(nn.Module):
-    def __init__(
-        self, in_features, hidden_dim, tied=True, bias=True, *args, **kwargs
-    ) -> None:
-        super().__init__(*args, **kwargs)
+    def __init__(self, in_features, hidden_dim, tied=True, bias=True, **kwargs) -> None:
+        super().__init__()
         self.M = nn.Parameter(
             torch.randn(in_features, hidden_dim),
             requires_grad=True,
@@ -28,7 +25,11 @@ class SparseAutoEncoder(nn.Module):
         else:
             self.register_parameter("bias", None)
 
+        # Initialize weights
         self.init_weights_bias_()
+        self.init_weights_D_()
+        if not tied:
+            self.init_weights_M_()
 
     @property
     def D(self) -> nn.Parameter:
@@ -84,10 +85,10 @@ class SparseAutoEncoder(nn.Module):
         x_hat = self.decode(c)
         return x_hat, c
 
-    def init_weights_D_(self, strategy: str):
+    def init_weights_D_(self, strategy: str = "orthogonal"):
         self._init_weight_(self.D, strategy)
 
-    def init_weights_M_(self, strategy: str):
+    def init_weights_M_(self, strategy: str = "orthogonal"):
         self._init_weight_(self.M, strategy)
 
     def init_weights_bias_(self):
