@@ -38,7 +38,9 @@ import subprocess
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Your script description")
     parser.add_argument("--variant", type=str, help="Variant name", required=True)
+    parser.add_argument("--tied_int", type=int, default=0, help="Tie the weights of the model")
     args, unknown_args = parser.parse_known_args()
+    args.tied_int = bool(args.tied_int)
 
     cmd = [
         "python",
@@ -71,6 +73,9 @@ if __name__ == "__main__":
         raise ValueError(f"Unknown variant {args.variant}")
 
     cmd.extend(unknown_args)
+
+    if args.tied_int:
+        cmd.extend(["--tied"])
 
     print(f"Running command: {' '.join(cmd)}")
     # run the command
