@@ -43,6 +43,7 @@ def get_ds(args):
         text_ds,
         cache_root_dir=args.cache_dir,
         flatten_sequence=True,
+        max_length=args.max_seq_length,
     )
 
     del text_ds
@@ -170,7 +171,7 @@ def main(args):
             sae.save(save_path)
 
 
-if __name__ == "__main__":
+def get_args():
     import argparse
 
     parser = argparse.ArgumentParser()
@@ -180,6 +181,7 @@ if __name__ == "__main__":
     parser.add_argument("--cache_dir", type=str, default=get_embeddings_cache_dir())
     parser.add_argument("--text_dataset", type=str, default="NeelNanda/pile-10k")
     parser.add_argument("--layername", type=str, default="layers.4")
+    parser.add_argument("--max_seq_length", type=int, default=128)
 
     # model
     parser.add_argument(
@@ -220,7 +222,15 @@ if __name__ == "__main__":
     # save SAE
     parser.add_argument("--save_path", type=str, default=None)
 
-    args = parser.parse_args()
+    args, unknown_args = parser.parse_known_args()
+
+    print(f"Unknown args: {unknown_args}")
 
     set_seed(args.seed)
+
+    return args
+
+
+if __name__ == "__main__":
+    args = get_args()
     main(args)
