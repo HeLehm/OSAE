@@ -1,5 +1,7 @@
 import torch
 
+from .utils import get_extended_state_dict, load_from_extended_state_dict
+
 
 def householder(u, v):
     """
@@ -50,6 +52,13 @@ class OrthogonalSAE(torch.nn.Module):
                 "The hidden dimension should either be the same as the input dimension or twice as large"
             )
 
+        # store these so we can save and load the model
+        self.in_features = in_features
+        self.hidden_dim = hidden_dim
+        self.bias = bias
+        self.allow_shear = allow_shear
+        self.tied = tied
+
         super().__init__()
         if not tied:
             self._M = torch.nn.Parameter(
@@ -60,12 +69,12 @@ class OrthogonalSAE(torch.nn.Module):
             self.register_parameter("_M", None)
 
         if bias:
-            self.bias = torch.nn.Parameter(
+            self.bias_weight = torch.nn.Parameter(
                 torch.randn(hidden_dim),
                 requires_grad=True,
             )
         else:
-            self.register_parameter("bias", None)
+            self.register_parameter("bias_weight", None)
 
         decoder_allowed_directions_value = (
             torch.cat(
@@ -157,8 +166,8 @@ class OrthogonalSAE(torch.nn.Module):
         return: (batch_size, hidden_dim)
         """
         c = x @ self.M
-        if self.bias is not None:
-            c += self.bias
+        if self.bias_weight is not None:
+            c += self.bias_weight
 
         c = self.activation(c)
         return c
@@ -176,3 +185,20 @@ class OrthogonalSAE(torch.nn.Module):
         c = self.encode(x)
         x_hat = self.decode(c)
         return x_hat, c
+
+    def save(self, path):
+        """
+        Save the model to disk.
+        """
+        torch.save(
+            get_extended_state_dict(self, cls=self.__class__),
+            path,
+        )
+
+    @classmethod
+    def load(cls, path, **config_overrides):
+        """
+        Load the model from disk.
+        """
+        state_dict = torch.load(path)
+        return load_from_extended_state_dict(cls, state_dict, **config_overrides)
