@@ -15,8 +15,9 @@ from src.utils import log_dict, wandb_log
 from src.metrics import (
     mean_pairwise_cosine_similarity,
     mean_max_cosine_similarity,
-    SlidingWindowDeadNeuronTracker,
+    DeadNeuronDetector,
 )
+from typing import Optional, Callable, Dict
 
 
 def set_seed(seed):
@@ -52,6 +53,139 @@ def get_ds(args):
     return ds
 
 
+def iterate_one_epoch(
+    dl,
+    sae,
+    args,
+    pre_forward: Optional[Callable[[None], None]] = lambda: None,
+    additional_metrics: Optional[
+        Callable[[torch.Tensor, torch.Tensor, torch.Tensor], Dict[str, float]]
+    ] = lambda x, y, z: {},
+    on_loss: Optional[Callable[[torch.Tensor], None]] = lambda x: None,
+    on_batch_metrics: Optional[Callable[[Dict[str, float]], None]] = lambda x: None,
+):
+    avg_metrics = {}
+
+    for x, _ in (pbar := tqdm(dl)):
+        pre_forward()
+
+        metrics = {}
+        x = x.to(args.device)
+
+        # forward pass
+        x_hat, c = sae(x)
+
+        # calculate losses
+        reconstruction_loss = F.mse_loss(x, x_hat)
+        unscaled_sparsity_loss = torch.linalg.norm(c, ord=1, dim=-1).mean()
+        sparsity_loss = args.l1 * unscaled_sparsity_loss
+        loss = reconstruction_loss + sparsity_loss
+
+        # only aplicable for orthogonal
+        if hasattr(sae, "shear_param") and sae.shear_param is not None:
+            shear_loss = torch.linalg.norm(sae.shear_param, ord=1)
+            metrics.update(
+                {
+                    "unscaled_shear_loss": shear_loss.item(),
+                    "scaled_shear_loss": shear_loss.item() * args.shear_l1,
+                }
+            )
+            if args.shear_l1 > 0:
+                loss += args.shear_l1 * shear_loss
+
+        metrics.update(
+            {
+                "reconstruction_loss": reconstruction_loss.item(),
+                "unscaled_sparsity_loss": unscaled_sparsity_loss.item(),
+                "sparsity_loss": sparsity_loss.item(),
+                "loss": loss.item(),
+            }
+        )
+
+        # for loss.backward and optimizer.step and such
+        on_loss(loss)
+
+        # update metrics
+        metrics.update(additional_metrics(x, x_hat, c))
+
+        # update average metrics
+        for k, v in metrics.items():
+            avg_metrics[k] = avg_metrics.get(k, 0) + v
+
+        on_batch_metrics(metrics)
+
+        pbar.set_description(f"Loss: {loss.item():.4f}")
+
+    # average metrics
+    for k, v in avg_metrics.items():
+        avg_metrics[k] = v / len(dl)
+    return avg_metrics
+
+
+@torch.no_grad()
+def evaluate_one_epoch(dl, sae, args):
+    sae.eval()
+
+    dnd = DeadNeuronDetector()
+
+    def additional_eval_metrics(x, x_hat, c):
+        cos_sim = mean_pairwise_cosine_similarity(x, x_hat)
+        dnd.on_batch(c)
+        return {
+            "reconstruction_cos_sim": cos_sim.item(),
+        }
+
+    eval_metrics = iterate_one_epoch(
+        dl, sae, args, additional_metrics=additional_eval_metrics
+    )
+
+    # add cosine sim of sae to eval_metrics
+    eval_metrics["mean_max_cos_D"] = mean_max_cosine_similarity(sae.D).item()
+    # add deat neuron_count
+    _, dead_count = dnd.on_epoch_end()
+    eval_metrics["dead_neurons_count"] = dead_count
+
+    eval_metrics = {f"eval/ave_epoch/{k}": v for k, v in eval_metrics.items()}
+    wandb_log(eval_metrics)
+
+    return eval_metrics
+
+
+def train_one_epoch(dl, sae, optimizer, args):
+    sae.train()
+
+    def on_loss(loss):
+        loss.backward()
+        optimizer.step()
+
+    def log_train_metrics(metrics):
+        wandb_log({f"train/batch/{k}": v for k, v in metrics.items()})
+
+    def additional_train_metrics(x, x_hat, c):
+        cos_sim = mean_pairwise_cosine_similarity(x, x_hat)
+        return {
+            "reconstruction_cos_sim": cos_sim.item(),
+        }
+
+    def pre_forward():
+        optimizer.zero_grad()
+
+    train_metrics = iterate_one_epoch(
+        dl,
+        sae,
+        args,
+        pre_forward=pre_forward,
+        on_loss=on_loss,
+        on_batch_metrics=log_train_metrics,
+        additional_metrics=additional_train_metrics,
+    )
+
+    train_metrics = {f"train/ave_epoch/{k}": v for k, v in train_metrics.items()}
+    wandb_log(train_metrics)
+
+    return train_metrics
+
+
 def main(args):
     if args.wandb != "":
         wandb.init(project=args.wandb, config=args, entity="bschergen")
@@ -84,89 +218,31 @@ def main(args):
     optimizer = torch.optim.Adam(sae.parameters(), lr=args.lr)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, args.epochs + 1)
 
-    dead_neuron_detector = SlidingWindowDeadNeuronTracker(len(dl), sae.M.shape[1])
-
-    steps = 0
-
     for _ in range(args.epochs):
-        sae.train()
-        for x, _ in (pbar := tqdm(dl)):
-            metrics = {}
-            optimizer.zero_grad()
-            x = x.to(args.device)
+        # log lr
+        wandb_log({"train/lr": scheduler.get_last_lr()[0]})
 
-            x_hat, c = sae(x)
-
-            reconstruction_loss = F.mse_loss(x, x_hat)
-            unscaled_sparsity_loss = torch.linalg.norm(c, ord=1, dim=-1).mean()
-            sparsity_loss = args.l1 * unscaled_sparsity_loss
-            loss = reconstruction_loss + sparsity_loss
-
-            shear_loss = None
-            # only aplicable for orthogonal
-            if hasattr(sae, "shear_param") and sae.shear_param is not None:
-                shear_loss = torch.linalg.norm(sae.shear_param, ord=1)
-                metrics.update(
-                    {
-                        "train/unscaled_shear_loss": shear_loss.item(),
-                        "train/scaled_shear_loss": shear_loss.item() * args.shear_l1,
-                    }
-                )
-                if args.shear_l1 > 0:
-                    loss += args.shear_l1 * shear_loss
-
-            loss.backward()
-            optimizer.step()
-            steps += args.batch_size
-
-            neuron_inactivity_periods = dead_neuron_detector.on_batch(c)
-
-            cos_sim = mean_pairwise_cosine_similarity(x, x_hat)
-
-            # somewhat pricey to calulate
-            mean_max_cos_D = mean_max_cosine_similarity(sae.D)
-
-            metrics.update(
-                {
-                    "train/neuron_inactivity_periods@0.75": neuron_inactivity_periods.quantile(
-                        0.75
-                    ).item(),
-                    "train/neuron_inactivity_periods@0.5": neuron_inactivity_periods.quantile(
-                        0.5
-                    ).item(),
-                    "train/neuron_inactivity_periods@0.25": neuron_inactivity_periods.quantile(
-                        0.25
-                    ).item(),
-                    "train/num_dead_neurons": (neuron_inactivity_periods == 1.0)
-                    .sum()
-                    .item(),
-                    "train/loss": loss.item(),
-                    "train/reconstruction_loss": reconstruction_loss.item(),
-                    "train/reconstruction_cos_sim": cos_sim.item(),
-                    "train/sparsity_loss": sparsity_loss.item(),
-                    "train/unscaled_sparsity_loss": unscaled_sparsity_loss.item(),
-                    "train/lr": scheduler.get_last_lr()[0],
-                    "train/steps": steps,
-                    "train/mean_max_cos_D": mean_max_cos_D.item(),
-                }
-            )
-
-            wandb_log(metrics)
-
-            pbar.set_description(
-                f"Loss: {loss.item():.4f}, Cosine Sim: {cos_sim.item():.4f}"
-            )
+        # train
+        train_one_epoch(dl, sae, optimizer, args)
 
         scheduler.step()
 
-    # save the model
+    # evaluate
+    evaluate_one_epoch(dl, sae, args)
 
+    # save the model
+    save_sae(sae, args)
+
+
+def save_sae(sae, args):
     if args.save_path is not None:
         if args.save_path != "auto":
             sae.save(args.save_path)
         else:
             save_dir = get_checkpoints_save_dir()
-            assert args.wandb != "", "wandb project name must be provided, if save_path is auto"
+            assert (
+                args.wandb != ""
+            ), "wandb project name must be provided, if save_path is auto"
             save_path = os.path.join(save_dir, wandb.run.id + ".pth")
             sae.save(save_path)
 
