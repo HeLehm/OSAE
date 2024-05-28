@@ -88,7 +88,7 @@ def main(args):
 
     for _ in range(args.epochs):
         sae.train()
-        for x in (pbar := tqdm(dl)):
+        for x, _ in (pbar := tqdm(dl)):
             metrics = {}
             optimizer.zero_grad()
             x = x.to(args.device)
