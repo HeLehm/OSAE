@@ -1,19 +1,22 @@
 from typing import Tuple
 import torch
 from torch import nn
-from torch.nn import functional as F
+from .utils import get_extended_state_dict, load_from_extended_state_dict
 
 
 class SparseAutoEncoder(nn.Module):
-    def __init__(
-        self, in_features, hidden_dim, tied=True, bias=True, *args, **kwargs
-    ) -> None:
-        super().__init__(*args, **kwargs)
+    def __init__(self, in_features, hidden_dim, tied=True, bias=True, **kwargs) -> None:
+        super().__init__()
         self.M = nn.Parameter(
             torch.randn(in_features, hidden_dim),
             requires_grad=True,
         )
         self.activation = nn.ReLU()
+
+        self.in_features = in_features
+        self.hidden_dim = hidden_dim
+        self.tied = tied
+        self.bias = bias
 
         if tied:
             self.register_parameter("_D", None)
@@ -24,11 +27,15 @@ class SparseAutoEncoder(nn.Module):
             )
 
         if bias:
-            self.bias = nn.Parameter(torch.randn(hidden_dim), requires_grad=True)
+            self.bias_weight = nn.Parameter(torch.randn(hidden_dim), requires_grad=True)
         else:
-            self.register_parameter("bias", None)
+            self.register_parameter("bias_weight", None)
 
+        # Initialize weights
         self.init_weights_bias_()
+        self.init_weights_D_()
+        if not tied:
+            self.init_weights_M_()
 
     @property
     def D(self) -> nn.Parameter:
@@ -45,8 +52,8 @@ class SparseAutoEncoder(nn.Module):
         self.normalize_D()
 
         c = x @ self.M
-        if self.bias is not None:
-            c += self.bias
+        if self.bias_weight is not None:
+            c += self.bias_weight
 
         c = self.activation(c)
         return c
@@ -84,30 +91,16 @@ class SparseAutoEncoder(nn.Module):
         x_hat = self.decode(c)
         return x_hat, c
 
-    def losses(
-        self,
-        x: torch.Tensor,
-        c: torch.Tensor,
-        x_hat: torch.Tensor,
-        l1_coeff: float = 1e-3,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """
-        Compute the reconstruction and sparsity losses.
-        """
-        reconstruction_loss = F.mse_loss(x, x_hat)
-        sparsity_loss = l1_coeff * torch.linalg.norm(c, ord=1, dim=-1).mean()
-        return reconstruction_loss, sparsity_loss
-
-    def init_weights_D_(self, strategy: str):
+    def init_weights_D_(self, strategy: str = "orthogonal"):
         self._init_weight_(self.D, strategy)
 
-    def init_weights_M_(self, strategy: str):
+    def init_weights_M_(self, strategy: str = "orthogonal"):
         self._init_weight_(self.M, strategy)
 
     def init_weights_bias_(self):
-        if self.bias is None:
+        if self.bias_weight is None:
             return
-        nn.init.normal_(self.bias)
+        nn.init.normal_(self.bias_weight)
 
     def _init_weight_(self, weight, strategy):
         if strategy == "xavier":
@@ -116,6 +109,23 @@ class SparseAutoEncoder(nn.Module):
             nn.init.orthogonal_(weight)
         else:
             raise ValueError("Invalid strategy")
+
+    def save(self, path):
+        """
+        Save the model to disk.
+        """
+        torch.save(
+            get_extended_state_dict(self, cls=self.__class__),
+            path,
+        )
+
+    @classmethod
+    def load(cls, path, **config_overrides):
+        """
+        Load the model from disk.
+        """
+        state_dict = torch.load(path)
+        return load_from_extended_state_dict(cls, state_dict, **config_overrides)
 
 
 if __name__ == "__main__":

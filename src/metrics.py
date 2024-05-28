@@ -1,11 +1,23 @@
 import torch
 
 
-def mean_cosine_similarity(x, x_hat):
+def mean_pairwise_cosine_similarity(x, x_hat):
     """
     Compute the mean cosine similarity between x and x_hat.
     """
     return torch.nn.functional.cosine_similarity(x_hat, x).mean()
+
+
+def mean_max_cosine_similarity(x):
+    """
+    Compute the mean of the maximum cosine similarity between all pairs of vectors in x.
+    """
+    x = x / (x.norm(dim=-1, keepdim=True) + 1e-8)
+    cos_table = x @ x.T
+    # exclude to self
+    cos_table = cos_table - torch.eye(cos_table.shape[0], device=cos_table.device)
+    return cos_table.max(dim=1).values.mean()
+    return (x @ x.T).max(dim=1).values.mean()
 
 
 def dead_neurons_batch(c: torch.Tensor, dead_1=True) -> torch.Tensor:

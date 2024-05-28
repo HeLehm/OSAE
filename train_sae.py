@@ -1,16 +1,20 @@
+import os
 import torch
+import torch.nn.functional as F
 import wandb
 
 from datasets import load_dataset
 from tqdm import tqdm
 
-from src.paths import get_embeddings_cache_dir
+from src.paths import get_embeddings_cache_dir, get_checkpoints_save_dir
 from src.backbone import get_backbone
 from src.act_dataset import ActivationDataset
 from src.sae import SparseAutoEncoder
+from src.orthogonal_sae import OrthogonalSAE
 from src.utils import log_dict, wandb_log
 from src.metrics import (
-    mean_cosine_similarity,
+    mean_pairwise_cosine_similarity,
+    mean_max_cosine_similarity,
     SlidingWindowDeadNeuronTracker,
 )
 
@@ -31,11 +35,6 @@ def set_seed(seed):
 def get_ds(args):
     backbone_model = get_backbone(args.model)
 
-    if args.info:
-        for name, _ in backbone_model.named_modules():
-            print(name)
-        return None
-
     text_ds = load_dataset(args.text_dataset)["train"]
 
     ds = ActivationDataset(
@@ -44,6 +43,7 @@ def get_ds(args):
         text_ds,
         cache_root_dir=args.cache_dir,
         flatten_sequence=True,
+        max_length=args.max_seq_length,
     )
 
     del text_ds
@@ -57,28 +57,27 @@ def main(args):
         wandb.init(project=args.wandb, config=args, entity="bschergen")
 
     ds = get_ds(args)
+    dl = torch.utils.data.DataLoader(ds, batch_size=args.batch_size, shuffle=True)
 
-    if ds is None:
-        if args.info:
-            return
-        else:
-            raise ValueError("Dataset is None")
+    # get the constructor for the SAE
+    sae_cls_map = {
+        "vanilla": SparseAutoEncoder,
+        "orthogonal": OrthogonalSAE,
+    }
+    sae_cls = sae_cls_map[args.architecture]
 
-    sae = SparseAutoEncoder(
+    # create the SAE
+    sae = sae_cls(
         in_features=ds.data.shape[-1],
         hidden_dim=int(args.R * ds.data.shape[-1]),
         tied=args.tied,
+        allow_shear=args.allow_shear,
         bias=True,
     )
-    log_dict({f"model/M_shape_{i}": v for i, v in enumerate(sae.M.shape)}, config=True)
-
-    dl = torch.utils.data.DataLoader(ds, batch_size=args.batch_size, shuffle=True)
-
-    sae.init_weights_D_(args.init_strategy_D)
-    if not args.tied:
-        sae.init_weights_M_(args.init_strategy_M)
     sae.to(args.device)
     sae.train()
+
+    log_dict({f"model/M_shape_{i}": v for i, v in enumerate(sae.M.shape)}, config=True)
 
     # in: [Interim research report] Taking features out of superposition with sparse autoencoders
     # lr = 0.001, batch_size = 256, optim = Adam
@@ -91,44 +90,88 @@ def main(args):
 
     for _ in range(args.epochs):
         sae.train()
-        for x in (pbar := tqdm(dl)):
+        for x, _ in (pbar := tqdm(dl)):
+            metrics = {}
             optimizer.zero_grad()
             x = x.to(args.device)
+
             x_hat, c = sae(x)
-            reconstruction_loss, sparsity_loss = sae.losses(x, c, x_hat, args.l1)
+
+            reconstruction_loss = F.mse_loss(x, x_hat)
+            unscaled_sparsity_loss = torch.linalg.norm(c, ord=1, dim=-1).mean()
+            sparsity_loss = args.l1 * unscaled_sparsity_loss
             loss = reconstruction_loss + sparsity_loss
+
+            shear_loss = None
+            # only aplicable for orthogonal
+            if hasattr(sae, "shear_param") and sae.shear_param is not None:
+                shear_loss = torch.linalg.norm(sae.shear_param, ord=1)
+                metrics.update(
+                    {
+                        "train/unscaled_shear_loss": shear_loss.item(),
+                        "train/scaled_shear_loss": shear_loss.item() * args.shear_l1,
+                    }
+                )
+                if args.shear_l1 > 0:
+                    loss += args.shear_l1 * shear_loss
+
             loss.backward()
             optimizer.step()
             steps += args.batch_size
 
-            dead_stats = dead_neuron_detector.on_batch(c)
-            num_dead = (dead_stats == 1.0).sum().item()
+            neuron_inactivity_periods = dead_neuron_detector.on_batch(c)
 
-            cos_sim = mean_cosine_similarity(x, x_hat)
+            cos_sim = mean_pairwise_cosine_similarity(x, x_hat)
 
-            wandb_log(
+            # somewhat pricey to calulate
+            mean_max_cos_D = mean_max_cosine_similarity(sae.D)
+
+            metrics.update(
                 {
-                    "train/dead_neurons_stats@0.75": dead_stats.quantile(0.75).item(),
-                    "train/dead_neurons_stats@0.5": dead_stats.quantile(0.5).item(),
-                    "train/dead_neurons_stats@0.25": dead_stats.quantile(0.25).item(),
-                    "train/num_dead_neurons": num_dead,
+                    "train/neuron_inactivity_periods@0.75": neuron_inactivity_periods.quantile(
+                        0.75
+                    ).item(),
+                    "train/neuron_inactivity_periods@0.5": neuron_inactivity_periods.quantile(
+                        0.5
+                    ).item(),
+                    "train/neuron_inactivity_periods@0.25": neuron_inactivity_periods.quantile(
+                        0.25
+                    ).item(),
+                    "train/num_dead_neurons": (neuron_inactivity_periods == 1.0)
+                    .sum()
+                    .item(),
                     "train/loss": loss.item(),
                     "train/reconstruction_loss": reconstruction_loss.item(),
                     "train/reconstruction_cos_sim": cos_sim.item(),
                     "train/sparsity_loss": sparsity_loss.item(),
-                    "train/unscaled_sparsity_loss": sparsity_loss.item() / args.l1,
+                    "train/unscaled_sparsity_loss": unscaled_sparsity_loss.item(),
                     "train/lr": scheduler.get_last_lr()[0],
                     "train/steps": steps,
+                    "train/mean_max_cos_D": mean_max_cos_D.item(),
                 }
             )
+
+            wandb_log(metrics)
+
             pbar.set_description(
                 f"Loss: {loss.item():.4f}, Cosine Sim: {cos_sim.item():.4f}"
             )
 
         scheduler.step()
 
+    # save the model
 
-if __name__ == "__main__":
+    if args.save_path is not None:
+        if args.save_path != "auto":
+            sae.save(args.save_path)
+        else:
+            save_dir = get_checkpoints_save_dir()
+            assert args.wandb != "", "wandb project name must be provided, if save_path is auto"
+            save_path = os.path.join(save_dir, wandb.run.id + ".pth")
+            sae.save(save_path)
+
+
+def get_args():
     import argparse
 
     parser = argparse.ArgumentParser()
@@ -138,36 +181,56 @@ if __name__ == "__main__":
     parser.add_argument("--cache_dir", type=str, default=get_embeddings_cache_dir())
     parser.add_argument("--text_dataset", type=str, default="NeelNanda/pile-10k")
     parser.add_argument("--layername", type=str, default="layers.4")
+    parser.add_argument("--max_seq_length", type=int, default=128)
 
     # model
     parser.add_argument(
-        "--R", type=float, default=2.0, help="Multiplier for the hidden layer size"
+        "--architecture",
+        type=str,
+        default="vanilla",
+        help="vanilla or orthogonal",
+        choices=["vanilla", "orthogonal"],
     )
     parser.add_argument(
-        "--init_strategy_M",
-        type=str,
-        default="xavier",
-        help="Note: will be ignored if tied is True",
+        "--R", type=float, default=2.0, help="Multiplier for the hidden layer size"
     )
-    parser.add_argument("--init_strategy_D", type=str, default="xavier")
+    # only applicable for vanilla
+    parser.add_argument(
+        "--tied", action="store_true", help="Tie the weights of the model"
+    )
+    # only applicable for orthogonal
+    parser.add_argument(
+        "--allow_shear",
+        action="store_true",
+        help="Allow shear in the decoder matrix",
+    )
 
     # training
     parser.add_argument("--batch_size", type=int, default=2048)
     parser.add_argument("--lr", type=float, default=0.001)
-    parser.add_argument("--epochs", type=int, default=10)
+    parser.add_argument("--epochs", type=int, default=30)
+    # losses
     parser.add_argument("--l1", type=float, default=1e-3)
-    parser.add_argument(
-        "--tied", type=int, default=0, help="Tie the weights of the model"
-    )
+    # only applicable for orthogonal
+    parser.add_argument("--shear_l1", type=float, default=0.0)
 
     # misc
     parser.add_argument("--device", type=str, default="mps")
-    parser.add_argument("--info", action="store_true")
     parser.add_argument("--wandb", type=str, default="", help="wandb project name")
     parser.add_argument("--seed", type=int, default=42)
 
-    args = parser.parse_args()
-    args.tied = bool(args.tied)
+    # save SAE
+    parser.add_argument("--save_path", type=str, default=None)
+
+    args, unknown_args = parser.parse_known_args()
+
+    print(f"Unknown args: {unknown_args}")
 
     set_seed(args.seed)
+
+    return args
+
+
+if __name__ == "__main__":
+    args = get_args()
     main(args)

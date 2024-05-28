@@ -9,7 +9,8 @@ from tqdm import tqdm
 from .custom_hooked import HookedModel
 from .paths import get_embeddings_cache_dir
 
-from typing import Union
+from typing import Union, Tuple, List
+import json
 
 
 class ActivationDataset(Dataset):
@@ -42,19 +43,32 @@ class ActivationDataset(Dataset):
         if not self.exists():
             self.generate(model, text_dataset, **kwargs)
 
-        self.cache_file_name = self.get_cache_file_name()
+        self.activation_cache_file_name = self.get_activations_cache_name()
         self.data_shape = self._get_data_shape(model, text_dataset)
         self.data = np.memmap(
-            self.cache_file_name, dtype="float32", mode="r", shape=self.data_shape
+            self.activation_cache_file_name,
+            dtype="float32",
+            mode="r",
+            shape=self.data_shape,
+        )
+        self.corresponding_texts = self.load_corresponding_texts()
+
+        assert self.data_shape[0] == len(self.corresponding_texts)
+        assert (
+            self.data[0].shape[0] == len(self.corresponding_texts[0]) == self.max_length
         )
 
-        if self.flatten_sequence:
-            self.flattened_data = self.data.reshape(-1, self.data_shape[-1])
+        print("ActivationDataset with shape:", self.shape)
 
-        print(
-            "Data Shape:",
-            self.data.shape if not self.flatten_sequence else self.flattened_data.shape,
-        )
+    @property
+    def shape(self):
+        if not self.flatten_sequence:
+            return self.data_shape
+        return (self.data_shape[0] * self.max_length, self.data_shape[2])
+
+    @property
+    def feature_dim(self):
+        return self.data_shape[-1]
 
     def _make_model_hooked(self, model):
         if isinstance(model, str):
@@ -85,7 +99,21 @@ class ActivationDataset(Dataset):
                 truncation=True,
                 padding="max_length",
                 max_length=self.max_length,
+                return_offsets_mapping=True,
             )
+
+            # add corresponding text for each token/ later activation
+
+            val["corresponding_text"] = [
+                [
+                    examples["text"][test_i][start:end]
+                    for start, end in val["offset_mapping"][test_i]
+                ]
+                for test_i in range(len(examples["text"]))
+            ]
+
+            del val["offset_mapping"]
+
             return val
 
         text_dataset = text_dataset.map(
@@ -95,7 +123,7 @@ class ActivationDataset(Dataset):
             num_proc=num_proc,
         )
 
-        text_dataset = text_dataset.remove_columns(["text", "meta"])
+        text_dataset = text_dataset.remove_columns(["meta", "text"])
         text_dataset.set_format(type="torch", columns=["input_ids", "attention_mask"])
 
         if device is not None:
@@ -124,8 +152,15 @@ class ActivationDataset(Dataset):
         total_samples = len(text_dataset)
         memmap_shape = (total_samples,) + activation_shape[1:]
         activations = np.memmap(
-            self.get_cache_file_name(), dtype="float32", mode="w+", shape=memmap_shape
+            self.get_activations_cache_name(),
+            dtype="float32",
+            mode="w+",
+            shape=memmap_shape,
         )
+        # save corresponding text
+        corresponding_text = text_dataset["corresponding_text"]
+        with open(self.get_correponding_text_cache_name(), "w") as f:
+            json.dump(corresponding_text, f)
 
         start_idx = 0
         for batch in tqdm(dataloader, desc="Generating Activations"):
@@ -154,8 +189,15 @@ class ActivationDataset(Dataset):
         os.makedirs(p, exist_ok=True)
         return p
 
-    def get_cache_file_name(self):
-        return os.path.join(self.get_cache_dir(), self.layername + ".npy")
+    def get_activations_cache_name(self):
+        p = os.path.join(self.get_cache_dir(), self.layername, "activations.npy")
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        return p
+
+    def get_correponding_text_cache_name(self):
+        return self.get_activations_cache_name().replace(
+            "activations.npy", "corresponding_text.json"
+        )
 
     @torch.no_grad()
     def _get_data_shape(self, model, text_dataset):
@@ -169,14 +211,24 @@ class ActivationDataset(Dataset):
         return (len(text_dataset), self.max_length, example_activation.shape[-1])
 
     def exists(self):
-        return os.path.exists(self.get_cache_file_name())
+        return os.path.exists(self.get_activations_cache_name()) and os.path.exists(
+            self.get_correponding_text_cache_name()
+        )
+
+    def load_corresponding_texts(self):
+        with open(self.get_correponding_text_cache_name(), "r") as f:
+            return json.load(f)
 
     def __len__(self):
         if self.flatten_sequence:
-            return self.flattened_data.shape[0]
+            return self.data.shape[0] * self.max_length
         return self.data_shape[0]
 
-    def __getitem__(self, idx):
+    def __getitem__(self, idx) -> Tuple[torch.Tensor, Union[str, List[str]]]:
+        _idx = idx
         if self.flatten_sequence:
-            return torch.tensor(self.flattened_data[idx])
-        return torch.tensor(self.data[idx])
+            _idx, _idx2 = divmod(idx, self.max_length)
+            return torch.from_numpy(
+                self.data[_idx, _idx2].copy()
+            ), self.corresponding_texts[_idx][_idx2]
+        return torch.from_numpy(self.data[_idx].copy()), self.corresponding_texts[_idx]
