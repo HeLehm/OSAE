@@ -1,3 +1,4 @@
+import os
 import torch
 import torch.nn.functional as F
 import wandb
@@ -5,7 +6,7 @@ import wandb
 from datasets import load_dataset
 from tqdm import tqdm
 
-from src.paths import get_embeddings_cache_dir
+from src.paths import get_embeddings_cache_dir, get_checkpoints_save_dir
 from src.backbone import get_backbone
 from src.act_dataset import ActivationDataset
 from src.sae import SparseAutoEncoder
@@ -157,6 +158,17 @@ def main(args):
 
         scheduler.step()
 
+    # save the model
+
+    if args.save_path is not None:
+        if args.save_path != "auto":
+            sae.save(args.save_path)
+        else:
+            save_dir = get_checkpoints_save_dir()
+            assert args.wandb != "", "wandb project name must be provided, if save_path is auto"
+            save_path = os.path.join(save_dir, wandb.run.id + ".pth")
+            sae.save(save_path)
+
 
 if __name__ == "__main__":
     import argparse
@@ -204,6 +216,9 @@ if __name__ == "__main__":
     parser.add_argument("--device", type=str, default="mps")
     parser.add_argument("--wandb", type=str, default="", help="wandb project name")
     parser.add_argument("--seed", type=int, default=42)
+
+    # save SAE
+    parser.add_argument("--save_path", type=str, default=None)
 
     args = parser.parse_args()
 
