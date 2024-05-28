@@ -1,4 +1,5 @@
 import torch
+from typing import Dict
 
 
 def mean_pairwise_cosine_similarity(x, x_hat):
@@ -17,7 +18,6 @@ def mean_max_cosine_similarity(x):
     # exclude to self
     cos_table = cos_table - torch.eye(cos_table.shape[0], device=cos_table.device)
     return cos_table.max(dim=1).values.mean()
-    return (x @ x.T).max(dim=1).values.mean()
 
 
 def dead_neurons_batch(c: torch.Tensor, dead_1=True) -> torch.Tensor:
@@ -27,6 +27,48 @@ def dead_neurons_batch(c: torch.Tensor, dead_1=True) -> torch.Tensor:
     if dead_1:
         return c.abs().mean(dim=0) == 0
     return c.abs().mean(dim=0) != 0
+
+
+class DeadNeuronDetector:
+    def __init__(self):
+        self.dead_neurons_counter = None
+        self.sample_counter = 0
+
+    def on_batch(self, c):
+        """
+        Given a batch of activations, update the mask of dead neurons.
+        """
+        self.sample_counter += 1
+        mask = dead_neurons_batch(c, dead_1=True).to(torch.float32)
+        if self.dead_neurons_counter is None:
+            self.dead_neurons_counter = mask
+        else:
+            self.dead_neurons_counter += mask
+
+    def on_epoch_end(self, reset=True) -> Dict[int, float]:
+        """
+        Return a dict, where keys are indices of neurons
+        and keys are the proportion of batches, where the neuron was dead.
+        I.e. if values is 1.0 for a neuron, it was dead in all batches.
+        NOTE: resets the instance.
+        """
+        dead_neurons = self.dead_neurons_counter / self.sample_counter
+        if reset:
+            self.reset()
+
+        indices = dead_neurons.argsort(descending=True)
+        values = dead_neurons[indices]
+
+        # count where values == 1.0
+        dead_count = (values == 1.0).sum().item()
+        return {i.item(): v.item() for i, v in zip(indices, values)}, dead_count
+
+    def reset(self):
+        """
+        Reset the mask of dead neurons.
+        """
+        self.dead_neurons_counter = None
+        self.sample_counter = 0
 
 
 class SlidingWindowDeadNeuronTracker:

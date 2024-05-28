@@ -56,9 +56,6 @@ if __name__ == "__main__":
                 "vanilla",
             ]
         )
-    elif args.variant == "vanilla_tied":
-        cmd.extend(["--architecture", "vanilla", "--tied"])
-
     elif args.variant == "orthogonal":
         cmd.extend(
             [
