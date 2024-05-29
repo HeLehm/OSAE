@@ -9,15 +9,29 @@ def mean_pairwise_cosine_similarity(x, x_hat):
     return torch.nn.functional.cosine_similarity(x_hat, x).mean()
 
 
-def mean_max_cosine_similarity(x):
-    """
-    Compute the mean of the maximum cosine similarity between all pairs of vectors in x.
-    """
+def _cos_table(x): 
     x = x / (x.norm(dim=-1, keepdim=True) + 1e-8)
     cos_table = x @ x.T
     # exclude to self
     cos_table = cos_table - torch.eye(cos_table.shape[0], device=cos_table.device)
-    return cos_table.max(dim=1).values.mean()
+    return cos_table
+
+def decoder_weight_cos_stats(d_weights):
+    """
+    Compute the mean, min, and max cosine similarity between decoder weights.
+    """
+    cos_table = _cos_table(d_weights)
+
+    metrics = {
+        # mean of the max cosine similarity of each decoder weight
+        "mean_max_cos_D" : cos_table.max(dim=1).values.mean().item(),
+        # mean cosine sim between each feature vector and its closest neighbor
+        "mean_min_cos_D" : cos_table.min(dim=1).values.mean().item(),
+        # TODO: maybe more detailed (e.g. bins) histogram of cosine similarity
+        # see: https://www.lesswrong.com/posts/QoR8noAB3Mp2KBA4B/do-sparse-autoencoders-find-true-features#GRvPcH3NkvcSvzpym
+    }
+
+    return metrics
 
 
 def dead_neurons_batch(c: torch.Tensor, dead_1=True) -> torch.Tensor:
