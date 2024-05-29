@@ -9,12 +9,12 @@ from tqdm import tqdm
 from src.paths import get_embeddings_cache_dir, get_checkpoints_save_dir
 from src.backbone import get_backbone
 from src.act_dataset import ActivationDataset
-from src.sae import SparseAutoEncoder
-from src.orthogonal_sae import OrthogonalSAE
+from src.sae.models import SparseAutoEncoder
+from src.sae.models import OrthogonalSAE
 from src.utils import log_dict, wandb_log
 from src.metrics import (
     mean_pairwise_cosine_similarity,
-    mean_max_cosine_similarity,
+    decoder_weight_cos_stats,
     DeadNeuronDetector,
 )
 from typing import Optional, Callable, Dict
@@ -140,7 +140,7 @@ def evaluate_one_epoch(dl, sae, args):
     )
 
     # add cosine sim of sae to eval_metrics
-    eval_metrics["mean_max_cos_D"] = mean_max_cosine_similarity(sae.D).item()
+    eval_metrics.update(decoder_weight_cos_stats(sae.D))
     # add deat neuron_count
     _, dead_count = dnd.on_epoch_end()
     eval_metrics["dead_neurons_count"] = dead_count

@@ -1,31 +1,132 @@
+from typing import Tuple
 import torch
+from torch import nn
+from ..utils import get_extended_state_dict, load_from_extended_state_dict
+from .utils import householder
 
-from .utils import get_extended_state_dict, load_from_extended_state_dict
 
+class SparseAutoEncoder(nn.Module):
+    def __init__(self, in_features, hidden_dim, tied=True, bias=True, **kwargs) -> None:
+        super().__init__()
+        self.M = nn.Parameter(
+            torch.randn(in_features, hidden_dim),
+            requires_grad=True,
+        )
+        self.activation = nn.ReLU()
 
-def householder(u, v):
-    """
-    Compute the Householder matrix H that reflects vector u onto vector v.
-    """
-    if not (torch.abs(u.norm() - 1) < 1e-6) or not (torch.abs(v.norm() - 1) < 1e-6):
-        raise ValueError("Input vectors should be normalized")
+        self.in_features = in_features
+        self.hidden_dim = hidden_dim
+        self.tied = tied
+        self.bias = bias
 
-    assert (
-        u.shape == v.shape
-    ), f"Input vectors should have the same shape, but got {u.shape} and {v.shape}"
+        if tied:
+            self.register_parameter("_D", None)
+        else:
+            self._D = nn.Parameter(
+                torch.randn(hidden_dim, in_features),
+                requires_grad=True,
+            )
 
-    if torch.allclose(u, v):
-        return torch.eye(u.shape[0], device=u.device)
+        if bias:
+            self.bias_weight = nn.Parameter(torch.randn(hidden_dim), requires_grad=True)
+        else:
+            self.register_parameter("bias_weight", None)
 
-    w = u - v
-    w_norm = w.norm()
-    if w_norm == 0:
-        return torch.eye(u.shape[0], device=u.device)
+        # Initialize weights
+        self.init_weights_bias_()
+        self.init_weights_D_()
+        if not tied:
+            self.init_weights_M_()
 
-    w_outer = torch.outer(w, w)
-    H = torch.eye(u.shape[0], device=w_outer.device) - 2.0 * w_outer / w_norm**2
+    @property
+    def D(self) -> nn.Parameter:
+        if self._D is None:
+            return self.M.T
+        return self._D
 
-    return H
+    def encode(self, x):
+        """
+        Encode the input x using the encoder matrix M.
+        x: (batch_size, in_features)
+        return: (batch_size, hidden_dim)
+        """
+        self.normalize_D()
+
+        c = x @ self.M
+        if self.bias_weight is not None:
+            c += self.bias_weight
+
+        c = self.activation(c)
+        return c
+
+    def decode(self, c):
+        """
+        Decode the code c using the decoder matrix M.T.
+        c: (batch_size, hidden_dim)
+        return: (batch_size, in_features)
+        """
+        self.normalize_D()
+
+        x_hat = c @ self.D
+        return x_hat
+
+    def normalize_D(self):
+        """
+        Normalize the decoder matrix D.
+        NOTE: if tied M.T is D.
+
+        The decoder Matrix D is a J (hidden_dim) x h (in_features) matrix (no bias).
+        D can be M.T if tied.
+        D is normalized by column i.e. the learned features are normalized.
+        """
+        with torch.no_grad():
+            self.D.data.div_(torch.linalg.norm(self.D, ord=2, dim=0) + 1e-8)
+
+    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Forward pass of the autoencoder.
+        x: (batch_size, in_features)
+        return: (batch_size, in_features), (batch_size, hidden_dim)
+        """
+        c = self.encode(x)
+        x_hat = self.decode(c)
+        return x_hat, c
+
+    def init_weights_D_(self, strategy: str = "orthogonal"):
+        self._init_weight_(self.D, strategy)
+
+    def init_weights_M_(self, strategy: str = "orthogonal"):
+        self._init_weight_(self.M, strategy)
+
+    def init_weights_bias_(self):
+        if self.bias_weight is None:
+            return
+        nn.init.normal_(self.bias_weight)
+
+    def _init_weight_(self, weight, strategy):
+        if strategy == "xavier":
+            nn.init.xavier_normal_(weight)
+        elif strategy == "orthogonal":
+            nn.init.orthogonal_(weight)
+        else:
+            raise ValueError("Invalid strategy")
+
+    def save(self, path):
+        """
+        Save the model to disk.
+        """
+        torch.save(
+            get_extended_state_dict(self, cls=self.__class__),
+            path,
+        )
+
+    @classmethod
+    def load(cls, path, **config_overrides):
+        """
+        Load the model from disk.
+        """
+        state_dict = torch.load(path)
+        return load_from_extended_state_dict(cls, state_dict, **config_overrides)
 
 
 class OrthogonalSAE(torch.nn.Module):
