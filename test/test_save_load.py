@@ -7,8 +7,9 @@ import tempfile
 # append src path to sys
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
-from src.orthogonal_sae import OrthogonalSAE
-from src.sae import SparseAutoEncoder
+from src.sae.models import OrthogonalSAE
+from src.sae.models import SparseAutoEncoder
+from src.sae.auto_load import load_sae
 
 
 class TestClipSegSaveLoad(unittest.TestCase):
@@ -31,8 +32,29 @@ class TestClipSegSaveLoad(unittest.TestCase):
             tied=False,
         )
 
+    def test_auto_load_OSAE(self):
+        self._test_save_load(
+            OrthogonalSAE,
+            auto_load=True,
+            in_features=10,
+            hidden_dim=20,
+            bias=False,
+            allow_shear=False,
+            tied=False,
+        )
+
+    def test_auto_load_SAE(self):
+        self._test_save_load(
+            SparseAutoEncoder,
+            auto_load=True,
+            in_features=10,
+            hidden_dim=20,
+            bias=False,
+            tied=False,
+        )
+
     @torch.no_grad()
-    def _test_save_load(self, model_cls, **decoder_kwargs):
+    def _test_save_load(self, model_cls, auto_load=False, **decoder_kwargs):
         model = model_cls(**decoder_kwargs)
 
         model.eval()
@@ -47,7 +69,11 @@ class TestClipSegSaveLoad(unittest.TestCase):
 
             del model
 
-            model = model_cls.load(model_path)
+            if not auto_load:
+                model = model_cls.load(model_path)
+            else:
+                model = load_sae(model_path)
+
             model.eval()
 
         new_output, new_act = model(random_input)

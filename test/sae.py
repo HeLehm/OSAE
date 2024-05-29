@@ -3,7 +3,7 @@ import sys
 
 sys.path.append(os.path.abspath(os.path.dirname(os.path.dirname(__file__))))
 
-from src.sae import SparseAutoEncoder
+from src.sae.models import SparseAutoEncoder
 
 import unittest
 import torch

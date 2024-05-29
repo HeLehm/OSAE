@@ -9,8 +9,8 @@ from tqdm import tqdm
 from src.paths import get_embeddings_cache_dir, get_checkpoints_save_dir
 from src.backbone import get_backbone
 from src.act_dataset import ActivationDataset
-from src.sae import SparseAutoEncoder
-from src.orthogonal_sae import OrthogonalSAE
+from src.sae.models import SparseAutoEncoder
+from src.sae.models import OrthogonalSAE
 from src.utils import log_dict, wandb_log
 from src.metrics import (
     mean_pairwise_cosine_similarity,
