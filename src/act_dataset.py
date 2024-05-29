@@ -225,6 +225,9 @@ class ActivationDataset(Dataset):
         return self.data_shape[0]
 
     def __getitem__(self, idx) -> Tuple[torch.Tensor, Union[str, List[str]]]:
+        if isinstance(idx, slice):
+            return self.__getslice__(idx.start, idx.stop)
+
         _idx = idx
         if self.flatten_sequence:
             _idx, _idx2 = divmod(idx, self.max_length)
@@ -232,3 +235,18 @@ class ActivationDataset(Dataset):
                 self.data[_idx, _idx2].copy()
             ), self.corresponding_texts[_idx][_idx2]
         return torch.from_numpy(self.data[_idx].copy()), self.corresponding_texts[_idx]
+
+    def __getslice__(self, start, end):
+        if start is None:
+            start = 0
+        if end is None:
+            end = len(self)
+
+        new_instance = ActivationDataset.__new__(ActivationDataset)
+        new_instance.__dict__.update(self.__dict__)
+
+        new_instance.data = self.data[start:end]
+        new_instance.corresponding_texts = self.corresponding_texts[start:end]
+        new_instance.data_shape = (end - start,) + self.data_shape[1:]
+
+        return new_instance
