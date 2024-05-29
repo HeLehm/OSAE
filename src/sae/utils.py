@@ -1,5 +1,6 @@
 import torch
 
+
 def householder(u, v):
     """
     Compute the Householder matrix H that reflects vector u onto vector v.

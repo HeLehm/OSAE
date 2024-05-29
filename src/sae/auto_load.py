@@ -3,7 +3,6 @@ import torch
 from ..utils import load_from_extended_state_dict
 
 
-
 def load_sae(path):
     """
     Load the model from disk.

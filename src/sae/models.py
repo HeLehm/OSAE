@@ -129,7 +129,6 @@ class SparseAutoEncoder(nn.Module):
         return load_from_extended_state_dict(cls, state_dict, **config_overrides)
 
 
-
 class OrthogonalSAE(torch.nn.Module):
     """
     Orthogonal Sparse Autoencoder (OrthogonalSAE).
