@@ -17,3 +17,9 @@ def get_checkpoints_save_dir():
     p = os.path.join(get_data_dir(), "sae_checkpoints")
     os.makedirs(p, exist_ok=True)
     return p
+
+
+def get_neuron_recods_save_dir():
+    p = os.path.join(get_data_dir(), "neuron_records")
+    os.makedirs(p, exist_ok=True)
+    return p
