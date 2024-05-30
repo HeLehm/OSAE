@@ -192,7 +192,7 @@ def generate_neuron_records(
     # To store random samples for each neuron
     random_samples = defaultdict(list)
     # count how many times a neuron is activated
-    neuron_activation_counts = defaultdict(int)
+    neuron_activation_counts = {}
 
     # Iterate over activation records
     for i, (neuron_idx, activation_record) in enumerate(
@@ -200,7 +200,13 @@ def generate_neuron_records(
             activation_ds, sae, idx_filter, tqdm_desc="Generating Neuron Records"
         )
     ):
-        # if a neuron is not activated, we do not want to store it
+        # chekc if neuron has been seen before
+        if neuron_idx not in neuron_activation_counts:
+            # initialize the neuron, so we can later create an empty neuron record
+            neuron_activation_counts[neuron_idx] = 0
+
+
+        # if a neuron is not activated, we do not need to do any claculatiosn with it
         if max(activation_record.activations) <= 0:
             continue
 
@@ -236,6 +242,22 @@ def generate_neuron_records(
             neuron_id=NeuronId(neuron_index=neuron_idx, layer_index=layer_index),
             most_positive_activation_records=most_positive_activation_records,
             random_sample=random_sample,
+            activation_count=neuron_activation_counts[neuron_idx],
+        )
+
+        neuron_records.append(neuron_record)
+
+    # now even add the neurons that were not activated
+    for neuron_idx in set(neuron_activation_counts.keys()).difference(
+        set(neuron_activations.keys())
+    ):
+        # sanity check
+        assert neuron_activation_counts[neuron_idx] == 0
+        # Create a NeuronRecord object
+        neuron_record = NeuronRecord(
+            neuron_id=NeuronId(neuron_index=neuron_idx, layer_index=layer_index),
+            most_positive_activation_records=[],
+            random_sample=[],
             activation_count=neuron_activation_counts[neuron_idx],
         )
 
