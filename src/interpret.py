@@ -1,3 +1,11 @@
+import os
+
+# make sure an openai api key is set
+if "OPENAI_API_KEY" not in os.environ:
+    # warn the user and set the key to a fake
+    print("OPENAI_API_KEY not set, setting to fake key")
+    os.environ["OPENAI_API_KEY"] = "fake_key"
+
 import torch
 import heapq
 from torch import nn
@@ -5,9 +13,10 @@ from tqdm import tqdm
 from collections import defaultdict
 from typing import Optional, Union, List, Dict
 
+from neuron_explainer.activations.activations import NeuronRecord as _NeuronRecord
+
 from neuron_explainer.activations.activations import (
     ActivationRecord,
-    NeuronRecord,
     NeuronId,
     ActivationRecordSliceParams,
 )
@@ -21,6 +30,38 @@ from neuron_explainer.activations.activation_records import calculate_max_activa
 from neuron_explainer.explanations.scoring import simulate_and_score
 
 from .act_dataset import ActivationDataset
+
+
+from neuron_explainer.fast_dataclasses import (
+    FastDataclass,
+    register_dataclass,
+    dumps,
+    loads,
+)
+from dataclasses import dataclass, field
+
+
+@register_dataclass
+@dataclass
+class NeuronRecord(_NeuronRecord):
+    activation_count: int = 0
+
+
+@register_dataclass
+@dataclass
+class NeuronRecords(FastDataclass):
+    """dataclass that stores multiple neuron records"""
+
+    records: List[NeuronRecord] = field(default_factory=list)
+
+    def save(self, path: str):
+        with open(path, "w") as f:
+            f.write(dumps(self).decode("utf-8"))
+
+    @staticmethod
+    def load(path: str):
+        with open(path, "r") as f:
+            return loads(f.read())
 
 
 # Define comparison functions for ActivationRecord
@@ -105,13 +146,14 @@ def activation_record_iter(
             yield neuron_idx, activation_record
 
 
+@torch.no_grad()
 def generate_neuron_records(
     activation_ds: ActivationDataset,
     sae: nn.Module,
     top_k: int = 20,
     idx_filter: Optional[Union[int, List[int]]] = None,
     layer_index: int = 0,
-) -> List[NeuronRecord]:
+) -> NeuronRecords:
     """
     Generate NeuronRecord objects from the activation dataset and the model.
     NOTE: fragment length should be controlled by the activation dataset.
@@ -137,8 +179,8 @@ def generate_neuron_records(
 
     Returns
     -------
-    List[NeuronRecord]
-        List of NeuronRecord objects.
+    NeuronRecords
+        NeuronRecords.records: List of NeuronRecord objects.
             where NeuronRecord is a named tuple with fields:
                 - neuron_id: NeuronId (nor containing neuron idx and layer idx)
                 - most_positive_activation_records: List[ActivationRecord] (with len top_k)
@@ -194,18 +236,17 @@ def generate_neuron_records(
             neuron_id=NeuronId(neuron_index=neuron_idx, layer_index=layer_index),
             most_positive_activation_records=most_positive_activation_records,
             random_sample=random_sample,
+            activation_count=neuron_activation_counts[neuron_idx],
         )
-
-        # add in the activation count
-        neuron_record.activation_count = neuron_activation_counts[neuron_idx]
 
         neuron_records.append(neuron_record)
 
+    neuron_records = NeuronRecords(records=neuron_records)
     return neuron_records
 
 
 async def interpret(
-    neuron_records: List[NeuronRecord],
+    neuron_records: NeuronRecords,
     top_k: int = 20,
     eval_num_features: int = 150,
     explainer_model_name: str = "gpt-4",
@@ -214,6 +255,7 @@ async def interpret(
     """
     Interpret the features of the model using OpenAI's models
     """
+    neuron_records = neuron_records.records
     assert (
         len(neuron_records) > eval_num_features
     ), "Number of features should be greater than eval_num_features"

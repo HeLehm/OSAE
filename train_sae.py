@@ -33,7 +33,7 @@ def set_seed(seed):
     torch.backends.cudnn.benchmark = False
 
 
-def get_ds(args):
+def get_ds(args, flatten_sequence=True):
     backbone_model = get_backbone(args.model)
 
     text_ds = load_dataset(args.text_dataset)["train"]
@@ -43,7 +43,7 @@ def get_ds(args):
         backbone_model,
         text_ds,
         cache_root_dir=args.cache_dir,
-        flatten_sequence=True,
+        flatten_sequence=flatten_sequence,
         max_length=args.max_seq_length,
     )
 
@@ -234,17 +234,26 @@ def main(args):
     save_sae(sae, args)
 
 
+def get_sae_checkpoint_path(args):
+    if args.save_path is None:
+        return None
+    if args.save_path != "auto":
+        return args.save_path
+    else:
+        save_dir = get_checkpoints_save_dir()
+        if hasattr(args, "wandb_id"):
+            return os.path.join(save_dir, args.wandb_id + ".pth")
+        assert (
+            args.wandb != ""
+        ), "wandb project name must be provided, if save_path is auto"
+        return os.path.join(save_dir, wandb.run.id + ".pth")
+
+
 def save_sae(sae, args):
-    if args.save_path is not None:
-        if args.save_path != "auto":
-            sae.save(args.save_path)
-        else:
-            save_dir = get_checkpoints_save_dir()
-            assert (
-                args.wandb != ""
-            ), "wandb project name must be provided, if save_path is auto"
-            save_path = os.path.join(save_dir, wandb.run.id + ".pth")
-            sae.save(save_path)
+    save_path = get_sae_checkpoint_path(args)
+    if save_path is None:
+        return
+    sae.save(save_path)
 
 
 def get_args():
