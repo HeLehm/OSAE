@@ -3,3 +3,7 @@ transformers>=4.40.0
 datasets
 wandb
 tqdm
+flask
+accelerate
+# only cuda i think
+bitsandbytes

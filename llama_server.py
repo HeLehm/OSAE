@@ -33,12 +33,13 @@ def generate_text():
         temperature = data.get("temperature", 0.6)
         top_p = data.get("top_p", 0.9)
 
-        print("Got request with data", data)
 
         # Create the prompt using the chat template
         prompt = pipeline.tokenizer.apply_chat_template(
             messages, tokenize=False, add_generation_prompt=True
         )
+
+        print(prompt)
 
         terminators = [
             pipeline.tokenizer.eos_token_id,
