@@ -11,57 +11,18 @@ import heapq
 from torch import nn
 from tqdm import tqdm
 from collections import defaultdict
-from typing import Optional, Union, List, Dict
+from typing import Optional, Union, List
 
-from neuron_explainer.activations.activations import NeuronRecord as _NeuronRecord
 
 from neuron_explainer.activations.activations import (
     ActivationRecord,
     NeuronId,
-    ActivationRecordSliceParams,
 )
-from neuron_explainer.explanations.explainer import TokenActivationPairExplainer
-from neuron_explainer.explanations.prompt_builder import PromptFormat
-from neuron_explainer.explanations.calibrated_simulator import (
-    UncalibratedNeuronSimulator,
-)
-from neuron_explainer.explanations.simulator import ExplanationNeuronSimulator
-from neuron_explainer.activations.activation_records import calculate_max_activation
-from neuron_explainer.explanations.scoring import simulate_and_score
 
-from .act_dataset import ActivationDataset
+from ..act_dataset import ActivationDataset
 
 
-from neuron_explainer.fast_dataclasses import (
-    FastDataclass,
-    register_dataclass,
-    dumps,
-    loads,
-)
-from dataclasses import dataclass, field
-
-
-@register_dataclass
-@dataclass
-class NeuronRecord(_NeuronRecord):
-    activation_count: int = 0
-
-
-@register_dataclass
-@dataclass
-class NeuronRecords(FastDataclass):
-    """dataclass that stores multiple neuron records"""
-
-    records: List[NeuronRecord] = field(default_factory=list)
-
-    def save(self, path: str):
-        with open(path, "w") as f:
-            f.write(dumps(self).decode("utf-8"))
-
-    @staticmethod
-    def load(path: str):
-        with open(path, "r") as f:
-            return loads(f.read())
+from .dataclasses import NeuronRecord, NeuronRecords
 
 
 # Define comparison functions for ActivationRecord
@@ -192,7 +153,7 @@ def generate_neuron_records(
     # To store random samples for each neuron
     random_samples = defaultdict(list)
     # count how many times a neuron is activated
-    neuron_activation_counts = defaultdict(int)
+    neuron_activation_counts = {}
 
     # Iterate over activation records
     for i, (neuron_idx, activation_record) in enumerate(
@@ -200,7 +161,12 @@ def generate_neuron_records(
             activation_ds, sae, idx_filter, tqdm_desc="Generating Neuron Records"
         )
     ):
-        # if a neuron is not activated, we do not want to store it
+        # chekc if neuron has been seen before
+        if neuron_idx not in neuron_activation_counts:
+            # initialize the neuron, so we can later create an empty neuron record
+            neuron_activation_counts[neuron_idx] = 0
+
+        # if a neuron is not activated, we do not need to do any claculatiosn with it
         if max(activation_record.activations) <= 0:
             continue
 
@@ -241,101 +207,21 @@ def generate_neuron_records(
 
         neuron_records.append(neuron_record)
 
+    # now even add the neurons that were not activated
+    for neuron_idx in set(neuron_activation_counts.keys()).difference(
+        set(neuron_activations.keys())
+    ):
+        # sanity check
+        assert neuron_activation_counts[neuron_idx] == 0
+        # Create a NeuronRecord object
+        neuron_record = NeuronRecord(
+            neuron_id=NeuronId(neuron_index=neuron_idx, layer_index=layer_index),
+            most_positive_activation_records=[],
+            random_sample=[],
+            activation_count=neuron_activation_counts[neuron_idx],
+        )
+
+        neuron_records.append(neuron_record)
+
     neuron_records = NeuronRecords(records=neuron_records)
     return neuron_records
-
-
-async def interpret(
-    neuron_records: NeuronRecords,
-    top_k: int = 20,
-    eval_num_features: int = 150,
-    explainer_model_name: str = "gpt-4",
-    simulator_model_name: str = "text-davinci-003",
-) -> List[Dict[str, Union[int, str, float]]]:
-    """
-    Interpret the features of the model using OpenAI's models
-    """
-    neuron_records = neuron_records.records
-    assert (
-        len(neuron_records) > eval_num_features
-    ), "Number of features should be greater than eval_num_features"
-
-    # initialize explainer
-    explainer = TokenActivationPairExplainer(
-        model_name=explainer_model_name,
-        prompt_format=PromptFormat.HARMONY_V4,
-        max_concurrent=1,
-    )
-
-    # sort by activation count
-    neuron_records.sort(key=lambda x: x.activation_count, reverse=True)
-    # drop all that are not activated at least top_k times
-    neuron_records = [x for x in neuron_records if x.activation_count > top_k]
-
-    assert len(neuron_records) > eval_num_features, "Not enough features to evaluate"
-
-    # select records (take high frequency neurons & low frequency neurons)
-    neuron_records_to_evaluate = (
-        neuron_records[: eval_num_features // 2]
-        + neuron_records[-eval_num_features // 2 :]
-    )
-
-    results = []
-
-    for neuron_record in tqdm(neuron_records_to_evaluate, desc="Interpreting Features"):
-        try:
-            # info about which feature we are evaluating
-            neuron_id: int = neuron_record.neuron_id.neuron_index
-            activation_count: int = neuron_record.activation_count
-
-            # Grab the activation records we'll need.
-            slice_params = ActivationRecordSliceParams(n_examples_per_split=5)
-            train_activation_records = neuron_record.train_activation_records(
-                activation_record_slice_params=slice_params
-            )
-            valid_activation_records = neuron_record.valid_activation_records(
-                activation_record_slice_params=slice_params
-            )
-
-            explanations = await explainer.generate_explanations(
-                all_activation_records=train_activation_records,
-                max_activation=calculate_max_activation(train_activation_records),
-                num_samples=1,
-            )
-
-            if len(explanations) > 1:
-                print(f"Multiple explanations for neuron {neuron_id}")
-                print("Taking the first explanation")
-                print(explanations)
-
-            explanation = explanations[0]
-
-            # initialize simulator,
-            simulator = UncalibratedNeuronSimulator(
-                ExplanationNeuronSimulator(
-                    simulator_model_name,
-                    explanation,
-                    max_concurrent=1,
-                    prompt_format=PromptFormat.INSTRUCTION_FOLLOWING,
-                )
-            )
-
-            scored_simulation = await simulate_and_score(
-                simulator, valid_activation_records
-            )
-            score = scored_simulation.get_preferred_score()
-
-            record = {
-                "neuron_id": neuron_id,
-                "explanation": explanation,
-                "score": score,
-                "activation_count": activation_count,
-            }
-
-            results.append(record)
-
-        except Exception as e:
-            print(f"Error for neuron {neuron_id}: {e}")
-            continue
-
-    return results

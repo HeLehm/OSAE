@@ -18,6 +18,10 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
 
+    # to test:
+    # rg3ucesp (vanilla)
+    # rmp0v3as (orthogonal)
+    # rdbqr2jr orthogonal shear
     parser.add_argument(
         "--wandb_id", type=str, required=True, help="wandb run id to load the sae from."
     )
