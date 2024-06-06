@@ -13,7 +13,11 @@ from typing import Union, List, Dict
 from neuron_explainer.activations.activations import (
     ActivationRecordSliceParams,
 )
-from neuron_explainer.explanations.explainer import TokenActivationPairExplainer, HARMONY_V4_MODELS
+from neuron_explainer.explanations.explainer import (
+    TokenActivationPairExplainer,
+    HARMONY_V4_MODELS,
+)
+
 HARMONY_V4_MODELS.append("meta-llama/Meta-Llama-3-8B-Instruct")
 from neuron_explainer.explanations.prompt_builder import PromptFormat
 from neuron_explainer.explanations.calibrated_simulator import (
@@ -68,7 +72,7 @@ def _create_simulator(
     if model_name in ["meta-llama/Meta-Llama-3-8B-Instruct"]:
         # replace with our client
         # TODO can our model handle PromptFormat.INSTRUCTION_FOLLOWING?
-        explain_simulator.client = LocalApiClient(
+        explain_simulator.api_client = LocalApiClient(
             model_name=model_name,
             max_concurrent=1,
             cache=False,
@@ -229,17 +233,18 @@ async def interpret_neuron_records(
     results = []
 
     for neuron_record in tqdm(neuron_records_to_evaluate, desc="Interpreting Features"):
-        try:
-            result = await interpret_neuron_record(
-                neuron_record,
-                n_examples_per_split=5,
-                simulator_model_name=simulator_model_name,
-                simulator_prompt_format=simulator_prompt_format,
-                explainer=explainer,
-            )
-            results.append(result)
-        except Exception as e:
-            print(f"Error for neuron {neuron_record.neuron_id}: {e}")
-            continue
+        # try:
+        result = await interpret_neuron_record(
+            neuron_record,
+            n_examples_per_split=5,
+            simulator_model_name=simulator_model_name,
+            simulator_prompt_format=simulator_prompt_format,
+            explainer=explainer,
+        )
+        results.append(result)
+    # except Exception as e:
+    #     print(f"Error for neuron {neuron_record.neuron_id}:")
+    #     print(e)
+    #     continue
 
     return results

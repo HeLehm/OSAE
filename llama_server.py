@@ -1,72 +1,220 @@
 import argparse
 import time
 from flask import Flask, request, jsonify
-import transformers
+from transformers import AutoTokenizer, AutoModelForCausalLM
 import torch
+from typing import Dict, Any, List, Optional
 
 app = Flask(__name__)
 
-pipeline = None
+model = None
+tokenizer = None
+"""
+SMAPLE:
+client.completions.create(
+    model="davinci-002",
+    prompt="Translate this German text to English: 'Ich bin ein Berliner'",
+    max_tokens=0,
+    echo=True,
+    logprobs=15
+)
+
+---->
+Completion(
+id='cmpl-9X4xTlUsVTVaaVBfZPnE8i2dmbcrD',
+choices=[CompletionChoice(finish_reason='length', index=0, logprobs=Logprobs(text_offset=[0, 9, 14, 21, 26, 29, 37, 38, 40, 43, 47, 51, 58, 60], token_logprobs=[None, -3.0610795, -10.573809, -3.7063658, -2.365942, -0.5000815, -2.5796685, -6.3122582, -2.836824, -1.9714774, -1.942698, -2.1503136, -0.007854446, -0.9208847], tokens=['Translate', ' this', ' German', ' text', ' to', ' English', ':', " '", 'Ich', ' bin', ' ein', ' Berlin', 'er', "'"], top_logprobs=[None, {' this': -3.0610795, ' to': -2.3953376, '\n\n': -3.1084037, ' the': -3.252296, ' into': -3.4042563}, {' German': -10.573809, ' page': -0.33744776, ' for': -3.4311252, ' post': -3.5867524, ' text': -4.142465, ' Page': -4.1822867}, {' text': -3.7063658, ' to': -1.9002755, '-': -2.944812, ' translation': -3.597767, ' document': -3.655453, ' word': -3.6742814}, {' to': -2.365942, ' into': -0.62988764, ':': -3.0473557, '\n\n': -3.247099, ':\n\n': -3.255372}, {' English': -0.5000815, ':': -1.9808974, ':\n\n': -3.567329, ' another': -4.100801, ' an': -4.21462}, {':': -2.5796685, '\n\n': -1.4703956, ' (': -2.112596, ' Translate': -2.8901496, ':\n\n': -2.8972383}, {" '": -6.3122582, ' Ich': -2.7060394, ' "': -3.4053984, ' Hal': -3.6897955, ' Die': -3.8494797, ' (': -3.9004383}, {'Ich': -2.836824, 'Die': -3.452189, 'The': -3.6653285, 'Der': -3.7949643, 'Das': -3.8457198}, {' bin': -1.9714774, ' habe': -1.7523392, ' möchte': -2.9595213, ' kann': -3.2676687, ' suche': -3.8232946}, {' ein': -1.942698, ' der': -3.2705407, ' eine': -3.3548398, ' nicht': -3.3629804, ' sehr': -3.4843717}, {' Berlin': -2.1503136, ' De': -3.4964697, ' Mann': -3.686618, ' Mens': -3.823023, ' Schwe': -4.3781166}, {'er': -0.007854446, 'erin': -5.75041, "'": -7.487542, '-B': -7.867202, 'ner': -8.48324}, {"'": -0.9208847, "'\n\n": -1.8898875, ".'": -2.4000297, "'.": -2.7712417, ".'\n\n": -3.1839662}]), text="Translate this German text to English: 'Ich bin ein Berliner'")], created=1717670911, model='davinci-002', object='text_completion', system_fingerprint=None, usage=CompletionUsage(completion_tokens=None, prompt_tokens=14, total_tokens=14)
+)
+
+
+
+"""
+# sample api response for tlogporps=15 and max_tokens=0
+
+
+# Completion(id='cmpl-9X4xTlUsVTVaaVBfZPnE8i2dmbcrD', choices=[CompletionChoice(finish_reason='length', index=0, logprobs=Logprobs(text_offset=[0, 9, 14, 21, 26, 29, 37, 38, 40, 43, 47, 51, 58, 60], token_logprobs=[None, -3.0610795, -10.573809, -3.7063658, -2.365942, -0.5000815, -2.5796685, -6.3122582, -2.836824, -1.9714774, -1.942698, -2.1503136, -0.007854446, -0.9208847], tokens=['Translate', ' this', ' German', ' text', ' to', ' English', ':', " '", 'Ich', ' bin', ' ein', ' Berlin', 'er', "'"], top_logprobs=[None, {' this': -3.0610795, ' to': -2.3953376, '\n\n': -3.1084037, ' the': -3.252296, ' into': -3.4042563}, {' German': -10.573809, ' page': -0.33744776, ' for': -3.4311252, ' post': -3.5867524, ' text': -4.142465, ' Page': -4.1822867}, {' text': -3.7063658, ' to': -1.9002755, '-': -2.944812, ' translation': -3.597767, ' document': -3.655453, ' word': -3.6742814}, {' to': -2.365942, ' into': -0.62988764, ':': -3.0473557, '\n\n': -3.247099, ':\n\n': -3.255372}, {' English': -0.5000815, ':': -1.9808974, ':\n\n': -3.567329, ' another': -4.100801, ' an': -4.21462}, {':': -2.5796685, '\n\n': -1.4703956, ' (': -2.112596, ' Translate': -2.8901496, ':\n\n': -2.8972383}, {" '": -6.3122582, ' Ich': -2.7060394, ' "': -3.4053984, ' Hal': -3.6897955, ' Die': -3.8494797, ' (': -3.9004383}, {'Ich': -2.836824, 'Die': -3.452189, 'The': -3.6653285, 'Der': -3.7949643, 'Das': -3.8457198}, {' bin': -1.9714774, ' habe': -1.7523392, ' möchte': -2.9595213, ' kann': -3.2676687, ' suche': -3.8232946}, {' ein': -1.942698, ' der': -3.2705407, ' eine': -3.3548398, ' nicht': -3.3629804, ' sehr': -3.4843717}, {' Berlin': -2.1503136, ' De': -3.4964697, ' Mann': -3.686618, ' Mens': -3.823023, ' Schwe': -4.3781166}, {'er': -0.007854446, 'erin': -5.75041, "'": -7.487542, '-B': -7.867202, 'ner': -8.48324}, {"'": -0.9208847, "'\n\n": -1.8898875, ".'": -2.4000297, "'.": -2.7712417, ".'\n\n": -3.1839662}]), text="Translate this German text to English: 'Ich bin ein Berliner'")], created=1717670911, model='davinci-002', object='text_completion', system_fingerprint=None, usage=CompletionUsage(completion_tokens=None, prompt_tokens=14, total_tokens=14))
+
+
+# OpenAI API hits BadRequestError: Error code: 400 - {‘error’: {‘message’: “You requested a length 0 completion, but did not specify a ‘logprobs’ parameter to see the probability of each token. Either request a completion with length greater than 1, or set ‘logprobs’ to 0 (to see the probabilities of each token you submitted) or more (to also see the probabilities over alternative tokens).”, ‘type’: ‘invalid_request_error’, ‘param’: None, ‘code’: None}} [Error reference: https://platform.openai.com/docs/guides/error-codes/api-errors 9]
 
 
 def load_model(model_id, load_in_4bit=False, load_in_8bit=False, device="cuda"):
     model_kwargs = {"torch_dtype": torch.float16, "low_cpu_mem_usage": True}
     if load_in_4bit:
-        model_kwargs["quantization_config"] = {"load_in_4bit": True}
+        model_kwargs["quantization_config"] = {
+            "load_in_4bit": True,
+            # "bnb_4bit_use_double_quant":True,
+            # "bnb_4bit_quant_type":"nf4",
+            "bnb_4bit_compute_dtype": torch.bfloat16,
+        }
     elif load_in_8bit:
         model_kwargs["quantization_config"] = {"load_in_8bit": True}
 
-    return transformers.pipeline(
-        "text-generation",
-        model=model_id,
-        model_kwargs=model_kwargs,
-        device=device,
+    kwargs = {}
+    if not load_in_4bit and not load_in_8bit:
+        kwargs["device"] = device
+
+    tokenizer = AutoTokenizer.from_pretrained(model_id)
+    model = AutoModelForCausalLM.from_pretrained(
+        model_id,
+        device_map="auto",
+        **model_kwargs,
     )
+    return model, tokenizer
 
 
-@app.route("/v1/completions", methods=["POST"])
-def generate_text():
-    try:
-        data = request.json
-        messages = data["messages"]
-        max_tokens = data.get("max_tokens", 256)
-        temperature = data.get("temperature", 0.6)
-        top_p = data.get("top_p", 0.9)
+def handle_gen_output(
+    model,
+    tokenizer,
+    input_ids_len: int,
+    sequence: torch.LongTensor,
+    logprobs_count: int,
+    echo: bool,
+) -> Dict[str, Any]:
+    response = {}
 
+    if logprobs_count > 0:
+        # pass through model again
+        output = model(sequence.unsqueeze(0))
+        # output is a transformers.modeling_outputs.CausalLMOutput
+        logits = output.logits[0]
+        # apply log_softmax
+        logits = torch.nn.functional.log_softmax(logits, dim=-1)
 
-        # Create the prompt using the chat template
-        prompt = pipeline.tokenizer.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=True
+        # the tokens chosen
+        tokens: List[str] = tokenizer.convert_ids_to_tokens(
+            sequence.tolist(), skip_special_tokens=False
         )
+        # the long probs of the actual tokens chosen
+        # Starts with None
+        token_logprobs: List[Optional[float]] = []
+        token_logprobs.append(None)
+        for i in range(1, len(sequence)):
+            # we want to know the logit why it was selected, i.e. at step i -1
+            # that is why we start at 1 and add a None before
+            token_logprobs.append(logits[i - 1, sequence[i]].item())
 
-        print(prompt)
+        # compute the text offsets for each token
+        # starts with 0
+        text_offsets: List[int] = []
+        text_offsets.append(0)
+        for i in range(len(sequence) - 1):
+            text_offsets.append(
+                len(tokenizer.decode(sequence[: i + 1], skip_special_tokens=False))
+            )
 
-        terminators = [
-            pipeline.tokenizer.eos_token_id,
-            pipeline.tokenizer.convert_tokens_to_ids("<|eot_id|>"),
-        ]
+        # calcutae the top logprobs
+        # Also Starts with None
+        # key will be the token string representation and the value will be the log probability
+        top_logprobs: List[Optional[Dict[str:float]]] = []
+        top_logprobs.append(None)
+        for i in range(1, len(sequence)):
+            top_k = logits[i - 1].topk(logprobs_count)
+            top_logprobs.append(
+                {
+                    tokenizer.convert_ids_to_tokens(k, skip_special_tokens=False): v
+                    for k, v in zip(top_k.indices.tolist(), top_k.values.tolist())
+                }
+            )
 
-        # Generate the response
-        outputs = pipeline(
-            prompt,
+        response["logprobs"] = {
+            "token_logprobs": token_logprobs,
+            "top_logprobs": top_logprobs,
+            "tokens": tokens,
+            "text_offsets": text_offsets,
+        }
+
+    if not echo:
+        sequence = sequence[input_ids_len:]
+
+        # also slice the logprobs
+        if "logprobs" in response:
+            response["logprobs"]["token_logprobs"] = response["logprobs"][
+                "token_logprobs"
+            ][input_ids_len:]
+            response["logprobs"]["top_logprobs"] = response["logprobs"]["top_logprobs"][
+                input_ids_len:
+            ]
+            response["logprobs"]["tokens"] = response["logprobs"]["tokens"][
+                input_ids_len:
+            ]
+            response["logprobs"]["text_offsets"] = response["logprobs"]["text_offsets"][
+                input_ids_len:
+            ]
+
+    generated_text = tokenizer.decode(sequence, skip_special_tokens=True)
+    response["content"] = generated_text
+
+    return response
+
+
+def handle(request):
+    data = request.json
+    # print(data)
+    messages = data["messages"]
+    max_tokens = data.get("max_tokens", 256)
+    temperature = data.get("temperature", 0.6)
+    top_p = data.get("top_p", 0.9)
+    logprobs_count = data.get("logprobs", 0)
+    echo = data.get("echo", False)
+    n = data.get("n", 1)
+
+    input_ids = tokenizer.apply_chat_template(
+        messages, add_generation_prompt=True, return_tensors="pt"
+    ).to(model.device)
+
+    terminators = [
+        tokenizer.eos_token_id,
+        tokenizer.convert_tokens_to_ids("<|eot_id|>"),
+    ]
+
+    if n > 0:
+        outputs = model.generate(
+            input_ids,
+            num_return_sequences=n,
             max_new_tokens=max_tokens,
             eos_token_id=terminators,
             do_sample=True,
             temperature=temperature,
             top_p=top_p,
         )
+    else:
+        assert n == 0
+        outputs = input_ids.repeat(n, 1)
 
-        generated_text = outputs[0]["generated_text"][len(prompt) :]
+    # output is a transformers.generation.GenerateDecoderOnlyOutput
+    # output.sequences is a longtensor of shape (n_samples, seqlen (input + output))
 
-        # Format the response
-        result = {
-            "id": "cmpl-xxx",
-            "object": "text_completion",
-            "created": int(time.time()),
-            "choices": [{"text": generated_text, "index": 0}],
-        }
+    # somehwat like: https://platform.openai.com/docs/api-reference/making-requests
+    result = {
+        "object": "text_completion",
+        "created": int(time.time()),
+        "model": model.config.name_or_path,
+        "choices": [],
+    }
+
+    for i in range(n):
+        # TODO: finish_reason
+        choice = handle_gen_output(
+            model,
+            tokenizer,
+            input_ids.shape[-1],
+            outputs[i],
+            logprobs_count,
+            echo,
+        )
+        choice["index"] = i
+        result["choices"].append(choice)
+
+    return result
+
+
+@app.route("/v1/completions", methods=["POST"])
+def generate_text():
+    try:
+        result = handle(request)
         return jsonify(result), 200
     except Exception as e:
+        print(e)
         return jsonify({"error": str(e)}), 500
 
 
@@ -92,7 +240,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    pipeline = load_model(
+    model, tokenizer = load_model(
         args.model_id,
         load_in_4bit=args.load_in_4bit,
         load_in_8bit=args.load_in_8bit,
@@ -101,16 +249,26 @@ if __name__ == "__main__":
 
     if args.test:
         test_payload = {
-            "messages": [
+            "messages":
+            # [
+            #     {
+            #         "role": "system",
+            #         "content": "You are a pirate chatbot who always responds in pirate speak!",
+            #     },
+            #     {"role": "user", "content": "Who are you?"},
+            # ],
+            [
                 {
-                    "role": "system",
-                    "content": "You are a pirate chatbot who always responds in pirate speak!",
-                },
-                {"role": "user", "content": "Who are you?"},
+                    "role": "user",
+                    "content": "Translate this German text to English: 'Ich bin ein Berliner'",
+                }
             ],
-            "max_tokens": 256,
+            "max_tokens": 60,
             "temperature": 0.6,
             "top_p": 0.9,
+            "echo": True,
+            "logprobs": 3,
+            "n": 2,
         }
         with app.test_client() as client:
             print("Testing the API...")
