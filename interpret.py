@@ -3,10 +3,13 @@ import asyncio
 from src.paths import get_neuron_recods_save_dir
 from src.interpret import interpret_neuron_records, NeuronRecords
 
-async def main(args):
 
+async def main(args):
     # get path to neuron records
-    neuron_records_path = os.path.join(args.record_save_dir, "neuron_records_" + args.wandb_id + ".json")
+    neuron_records_path = os.path.join(
+        args.record_save_dir, "neuron_records_" + args.wandb_id + ".json"
+    )
+    print("Loading Neuron Records from: ", neuron_records_path)
     neuron_records = NeuronRecords.load(neuron_records_path)
 
     # interpret neuron records
@@ -16,6 +19,7 @@ async def main(args):
     )
 
     print(interpretation_results)
+
 
 if __name__ == "__main__":
     import argparse
@@ -36,4 +40,3 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     asyncio.run(main(args))
-    
