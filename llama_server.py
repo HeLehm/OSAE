@@ -42,7 +42,7 @@ def pretty_print_messages(messages):
     for message in messages:
         print()
         print(f"------- {message['role']} -------")
-        print(message['content'])
+        print(message["content"])
         print("----------------")
 
 
@@ -51,7 +51,6 @@ def pretty_print_json(response_object):
     pretty_response = json.dumps(response_object, indent=2)
     # Print the pretty formatted string
     print(pretty_response)
-
 
 
 def load_model(model_id, load_in_4bit=False, load_in_8bit=False, device="cuda"):
@@ -97,10 +96,6 @@ def handle_gen_output(
         # apply log_softmax
         logits = torch.nn.functional.log_softmax(logits, dim=-1)
 
-        # # the tokens chosen
-        # tokens: List[str] = tokenizer.convert_ids_to_tokens(
-        #     sequence.tolist(), skip_special_tokens=False
-        # )
         # the long probs of the actual tokens chosen
         # Starts with None
         token_logprobs: List[Optional[float]] = []
@@ -110,19 +105,19 @@ def handle_gen_output(
             # that is why we start at 1 and add a None before
             token_logprobs.append(logits[i - 1, sequence[i]].item())
 
+        # the tokens chosen
+        tokens: List[str] = []
         # compute the text offsets for each token
         # starts with 0
-        tokens : List[str] = []
         text_offsets: List[int] = []
         text_offsets.append(0)
         for i in range(len(sequence)):
-            decode_to_here = (tokenizer.decode(sequence[: i + 1], skip_special_tokens=False))
-            text_offsets.append(
-                len(decode_to_here)
+            decode_to_here = tokenizer.decode(
+                sequence[: i + 1], skip_special_tokens=False
             )
-            tokens.append(
-                decode_to_here[text_offsets[-2]:text_offsets[-1]]
-            )
+            text_offsets.append(len(decode_to_here))
+            tokens.append(decode_to_here[text_offsets[-2] : text_offsets[-1]])
+        # remove the last text offset as is is just the length of the sequence
         text_offsets.pop(-1)
 
         # calcutae the top logprobs
@@ -135,31 +130,20 @@ def handle_gen_output(
 
             current_tok_logprobs = {}
             for k, v in zip(top_k.indices.tolist(), top_k.values.tolist()):
-
+                # get the token str based on the fully decoded sequence
 
                 ids_with_candidate_token = sequence.clone()
                 ids_with_candidate_token[i] = k
-                ids_with_candidate_token = ids_with_candidate_token[:i+1]
+                ids_with_candidate_token = ids_with_candidate_token[: i + 1]
 
-                new_tok = tokenizer.decode(ids_with_candidate_token, skip_special_tokens=False)
-                new_tok = new_tok[text_offsets[i]:]
-
-                
-                ##new_tok = tokenizer.convert_ids_to_tokens(k, skip_special_tokens=False)
-
-
+                new_tok = tokenizer.decode(
+                    ids_with_candidate_token, skip_special_tokens=False
+                )
+                new_tok = new_tok[text_offsets[i] :]
 
                 current_tok_logprobs[new_tok] = v
 
             top_logprobs.append(current_tok_logprobs)
-
-
-            # top_logprobs.append(
-            #     {
-            #         tokenizer.convert_ids_to_tokens(k, skip_special_tokens=False): v
-            #         for k, v in zip(top_k.indices.tolist(), top_k.values.tolist())
-            #     }
-            # )
 
         response["logprobs"] = {
             "token_logprobs": token_logprobs,
@@ -187,12 +171,13 @@ def handle_gen_output(
             ]
 
     generated_text = tokenizer.decode(sequence, skip_special_tokens=True)
-    response['message'] = {
-        "role": "assistant", # TODO. should this be parsed?
+    response["message"] = {
+        "role": "assistant",  # TODO. should this be parsed?
         "content": generated_text,
     }
 
     return response
+
 
 @torch.no_grad()
 def handle(request):
@@ -322,7 +307,7 @@ if __name__ == "__main__":
         with app.test_client() as client:
             print("Testing the API...")
             response = client.post("/v1/completions", json=test_payload)
-            #print(response.json)
+            # print(response.json)
             pretty_print_json(response.json)
     else:
         app.run(host="0.0.0.0", port=5001)
