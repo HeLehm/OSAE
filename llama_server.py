@@ -186,8 +186,8 @@ def handle(request):
     #pretty_print_messages(data["messages"])
     messages = data["messages"]
     max_tokens = data.get("max_tokens", 256)
-    temperature = data.get("temperature", 0.6)
-    top_p = data.get("top_p", 0.9)
+    temperature = data.get("temperature", 1.0)
+    top_p = data.get("top_p", 1.0)
     logprobs_count = data.get("logprobs", 0)
     echo = data.get("echo", False)
     n = data.get("n", 1)
@@ -296,13 +296,7 @@ if __name__ == "__main__":
                     "role": "user",
                     "content": "This is a test \t with a tab",
                 }
-            ],
-            "max_tokens": 30,
-            "temperature": 0.6,
-            "top_p": 0.9,
-            "echo": True,
-            "logprobs": 3,
-            "n": 1,
+            ]
         }
         with app.test_client() as client:
             print("Testing the API...")

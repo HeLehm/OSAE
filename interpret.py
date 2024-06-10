@@ -2,28 +2,17 @@ import os
 import asyncio
 from src.paths import get_neuron_recods_save_dir
 from src.interpret import interpret_neuron_records, NeuronRecords
-import logging
+from create_neuron_records import get_neuron_record_save_path
 
-# set deubg level
-logging.basicConfig(
-    level=logging.DEBUG,
-    filename="interpret.log",
-    format="%(name)s - %(levelname)s - %(message)s",
-)
-
-
-async def main(args):
-    # get path to neuron records
-    neuron_records_path = os.path.join(
-        args.record_save_dir, "neuron_records_" + args.wandb_id + ".json"
-    )
+async def interpret(args):
+    neuron_records_path = get_neuron_record_save_path(args)
     print("Loading Neuron Records from: ", neuron_records_path)
     neuron_records = NeuronRecords.load(neuron_records_path)
 
     # interpret neuron records
     interpretation_results = await interpret_neuron_records(
         neuron_records=neuron_records,
-        eval_num_features=2,
+        eval_num_features=150,
     )
 
     print(interpretation_results)
@@ -37,7 +26,6 @@ if __name__ == "__main__":
     parser.add_argument(
         "--wandb_id",
         type=str,
-        default="z6vskit8",
         help="wandb run id to load the neruon records from.",
     )
 
@@ -47,4 +35,4 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    asyncio.run(main(args))
+    asyncio.run(interpret(args))
