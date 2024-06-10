@@ -1,8 +1,15 @@
 import os
 import asyncio
-from src.paths import get_neuron_recods_save_dir
+import json
+from src.paths import get_neuron_recods_save_dir, get_interpretability_save_dir
 from src.interpret import interpret_neuron_records, NeuronRecords
 from create_neuron_records import get_neuron_record_save_path
+
+
+def get_interpretability_save_path(args):
+    return os.path.join(
+        get_interpretability_save_dir(), f"interpretability_{args.wandb_id}.json"
+    )
 
 async def interpret(args):
     neuron_records_path = get_neuron_record_save_path(args)
@@ -15,7 +22,12 @@ async def interpret(args):
         eval_num_features=150,
     )
 
-    print(interpretation_results)
+    # save interpretation results
+    interpretation_save_path = get_interpretability_save_path(args)
+    print("Saving Interpretation Results to: ", interpretation_save_path)
+
+    with open(interpretation_save_path, "w") as f:
+        json.dump(interpretation_results, f, indent=4)
 
 
 if __name__ == "__main__":
