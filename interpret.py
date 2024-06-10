@@ -2,6 +2,14 @@ import os
 import asyncio
 from src.paths import get_neuron_recods_save_dir
 from src.interpret import interpret_neuron_records, NeuronRecords
+import logging
+
+# set deubg level
+logging.basicConfig(
+    level=logging.DEBUG,
+    filename="interpret.log",
+    format="%(name)s - %(levelname)s - %(message)s",
+)
 
 
 async def main(args):
@@ -29,7 +37,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--wandb_id",
         type=str,
-        required=True,
+        default="z6vskit8",
         help="wandb run id to load the neruon records from.",
     )
 
