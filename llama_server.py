@@ -113,7 +113,7 @@ def handle_gen_output(
         text_offsets.append(0)
         for i in range(len(sequence)):
             decode_to_here = tokenizer.decode(
-                sequence[: i + 1], skip_special_tokens=False
+                sequence[: i + 1], skip_special_tokens=True
             )
             text_offsets.append(len(decode_to_here))
             tokens.append(decode_to_here[text_offsets[-2] : text_offsets[-1]])
@@ -137,7 +137,7 @@ def handle_gen_output(
                 ids_with_candidate_token = ids_with_candidate_token[: i + 1]
 
                 new_tok = tokenizer.decode(
-                    ids_with_candidate_token, skip_special_tokens=False
+                    ids_with_candidate_token, skip_special_tokens=True
                 )
                 new_tok = new_tok[text_offsets[i] :]
 
@@ -182,8 +182,8 @@ def handle_gen_output(
 @torch.no_grad()
 def handle(request):
     data = request.json
-    print("----HAndlinG____")
-    pretty_print_messages(data["messages"])
+    #print("----HAndlinG____")
+    #pretty_print_messages(data["messages"])
     messages = data["messages"]
     max_tokens = data.get("max_tokens", 256)
     temperature = data.get("temperature", 0.6)
