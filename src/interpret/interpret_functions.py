@@ -7,8 +7,7 @@ if "OPENAI_API_KEY" not in os.environ:
     os.environ["OPENAI_API_KEY"] = "fake_key"
 
 from tqdm import tqdm
-from typing import Union, List, Dict
-
+from typing import Union, List, Dict, Optional
 
 from neuron_explainer.activations.activations import (
     ActivationRecordSliceParams,
@@ -27,12 +26,8 @@ from neuron_explainer.explanations.simulator import ExplanationNeuronSimulator
 from neuron_explainer.activations.activation_records import calculate_max_activation
 from neuron_explainer.explanations.scoring import simulate_and_score
 
-
 from .dataclasses import NeuronRecords
-
 from .local_api_client import LocalApiClient
-
-from typing import Optional
 
 
 def _create_explainer(
@@ -138,12 +133,16 @@ async def interpret_neuron_record(
     valid_activation_records = neuron_record.valid_activation_records(
         activation_record_slice_params=slice_params
     )
-
-    explanations = await explainer.generate_explanations(
-        all_activation_records=train_activation_records,
-        max_activation=calculate_max_activation(train_activation_records),
-        num_samples=1,
-    )
+    prompt_kwargs = {
+        "all_activation_records": train_activation_records,
+        "max_tokens_for_completion": 60,
+        "max_activation": calculate_max_activation(train_activation_records),
+    }
+    explainer_prompt = explainer.make_explanation_prompt(**prompt_kwargs)
+    # rename max_tokens_for_completion to max_tokens in prompt_kwargs
+    # generate_explanations(uses different kwargs than make_explanation_prompt)
+    prompt_kwargs["max_tokens"] = prompt_kwargs.pop("max_tokens_for_completion")
+    explanations = await explainer.generate_explanations(num_samples=1, **prompt_kwargs)
 
     if len(explanations) > 1:
         print(f"Multiple explanations for neuron {neuron_id}")
@@ -165,6 +164,7 @@ async def interpret_neuron_record(
         "explanation": explanation,
         "score": score,
         "activation_count": activation_count,
+        "explainer_prompt": explainer_prompt,
     }
 
     return result
@@ -233,18 +233,18 @@ async def interpret_neuron_records(
     results = []
 
     for neuron_record in tqdm(neuron_records_to_evaluate, desc="Interpreting Features"):
-        # try:
-        result = await interpret_neuron_record(
-            neuron_record,
-            n_examples_per_split=5,
-            simulator_model_name=simulator_model_name,
-            simulator_prompt_format=simulator_prompt_format,
-            explainer=explainer,
-        )
-        results.append(result)
-    # except Exception as e:
-    #     print(f"Error for neuron {neuron_record.neuron_id}:")
-    #     print(e)
-    #     continue
+        try:
+            result = await interpret_neuron_record(
+                neuron_record,
+                n_examples_per_split=5,
+                simulator_model_name=simulator_model_name,
+                simulator_prompt_format=simulator_prompt_format,
+                explainer=explainer,
+            )
+            results.append(result)
+        except Exception as e:
+            print(f"Error for neuron {neuron_record.neuron_id}:")
+            print(e)
+            continue
 
     return results

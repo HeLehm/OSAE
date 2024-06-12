@@ -53,7 +53,7 @@ def pretty_print_json(response_object):
     print(pretty_response)
 
 
-def load_model(model_id, load_in_4bit=False, load_in_8bit=False, device="cuda"):
+def load_model(model_id, load_in_4bit=False, load_in_8bit=False):
     model_kwargs = {"torch_dtype": torch.float16, "low_cpu_mem_usage": True}
     if load_in_4bit:
         model_kwargs["quantization_config"] = {
@@ -65,16 +65,13 @@ def load_model(model_id, load_in_4bit=False, load_in_8bit=False, device="cuda"):
     elif load_in_8bit:
         model_kwargs["quantization_config"] = {"load_in_8bit": True}
 
-    kwargs = {}
-    if not load_in_4bit and not load_in_8bit:
-        kwargs["device"] = device
-
     tokenizer = AutoTokenizer.from_pretrained(model_id)
     model = AutoModelForCausalLM.from_pretrained(
         model_id,
         device_map="auto",
         **model_kwargs,
     )
+    print(model.hf_device_map)
     return model, tokenizer
 
 
@@ -182,8 +179,8 @@ def handle_gen_output(
 @torch.no_grad()
 def handle(request):
     data = request.json
-    #print("----HAndlinG____")
-    #pretty_print_messages(data["messages"])
+    # print("----HAndlinG____")
+    # pretty_print_messages(data["messages"])
     messages = data["messages"]
     max_tokens = data.get("max_tokens", 256)
     temperature = data.get("temperature", 1.0)
@@ -239,6 +236,7 @@ def handle(request):
         choice["index"] = i
         result["choices"].append(choice)
 
+    # pretty_print_json(result)
     return result
 
 
@@ -264,9 +262,6 @@ if __name__ == "__main__":
         "--test", action="store_true", help="Test a simple API call and shut down."
     )
     parser.add_argument(
-        "--device", default="cuda", help="Device to run the model on (default: cuda)."
-    )
-    parser.add_argument(
         "--model_id",
         default="meta-llama/Meta-Llama-3-8B-Instruct",
         help="Model ID to load (default: meta-llama/Meta-Llama-3-8B-Instruct).",
@@ -278,7 +273,6 @@ if __name__ == "__main__":
         args.model_id,
         load_in_4bit=args.load_in_4bit,
         load_in_8bit=args.load_in_8bit,
-        device=args.device,
     )
 
     if args.test:

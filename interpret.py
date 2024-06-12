@@ -6,10 +6,11 @@ from src.interpret import interpret_neuron_records, NeuronRecords
 from create_neuron_records import get_neuron_record_save_path
 
 
-def get_interpretability_save_path(args):
+def get_interpretability_save_path(wandb_id):
     return os.path.join(
-        get_interpretability_save_dir(), f"interpretability_{args.wandb_id}.json"
+        get_interpretability_save_dir(), f"interpretability_{wandb_id}.json"
     )
+
 
 async def interpret(args):
     neuron_records_path = get_neuron_record_save_path(args)
@@ -23,7 +24,7 @@ async def interpret(args):
     )
 
     # save interpretation results
-    interpretation_save_path = get_interpretability_save_path(args)
+    interpretation_save_path = get_interpretability_save_path(args.wandb_id)
     print("Saving Interpretation Results to: ", interpretation_save_path)
 
     with open(interpretation_save_path, "w") as f:

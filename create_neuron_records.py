@@ -12,9 +12,11 @@ def get_wandb_run(run_id, entity, project):
     api = wandb.Api()
     return api.run(f"{entity}/{project}/{run_id}")
 
+
 def get_wandb_config(run_id, entity, project):
     run = get_wandb_run(run_id, entity, project)
     return run.config
+
 
 def infer_layer_idx(config):
     # try to create a better layer_index int for openai
@@ -29,21 +31,22 @@ def infer_layer_idx(config):
 
     return layer_idx
 
+
 def get_neuron_record_save_path(config):
     return os.path.join(
         config.record_save_dir, f"neuron_records_{config.wandb_id}.json"
-    )    
+    )
 
 
 def create_neuron_records(
-        config,
-        recreate=False,
+    config,
+    recreate=False,
 ):
     record_save_path = get_neuron_record_save_path(config)
     if os.path.exists(record_save_path) and not recreate:
         print(f"Neuron records already exist at {record_save_path}. Skipping.")
         return record_save_path
-    
+
     layer_idx = infer_layer_idx(config=config)
 
     # get dataset
@@ -109,7 +112,7 @@ def get_argparser():
         help="Debug mode. Only use a small subset of the data.",
     )
     parser.add_argument(
-        "--device", type=str, default="mps", help="Device to use for the SAE."
+        "--device", type=str, default="cuda", help="Device to use for the SAE."
     )
 
     return parser
@@ -122,7 +125,6 @@ def get_config_from_argparser(parser):
     config = {**config, **vars(args)}
     config = argparse.Namespace(**config)
     return config
-
 
 
 if __name__ == "__main__":
