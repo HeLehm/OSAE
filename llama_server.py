@@ -71,6 +71,7 @@ def load_model(model_id, load_in_4bit=False, load_in_8bit=False):
         device_map="auto",
         **model_kwargs,
     )
+    model.eval()
     print(model.hf_device_map)
     return model, tokenizer
 
@@ -244,6 +245,8 @@ def handle(request):
 def generate_text():
     try:
         result = handle(request)
+        # delete cuda cache
+        torch.cuda.empty_cache()
         return jsonify(result), 200
     except Exception as e:
         print(e)
