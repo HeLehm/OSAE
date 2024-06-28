@@ -22,6 +22,10 @@ async def interpret(args):
         neuron_records=neuron_records,
         eval_num_features=150,
     )
+    # explainer_model_name="gpt-4o",
+    # explainer_prompt_format=PromptFormat.HARMONY_V4,
+    # simulator_model_name="davinci-002",
+    # simulator_prompt_format=PromptFormat.NONE,
 
     # save interpretation results
     interpretation_save_path = get_interpretability_save_path(args.wandb_id)
