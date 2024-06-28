@@ -78,13 +78,19 @@ def iterate_one_epoch(
         # calculate losses
         reconstruction_loss = F.mse_loss(x, x_hat)
         unscaled_sparsity_loss = torch.linalg.norm(c, ord=1, dim=-1).mean()
-        unscaled_nuc_loss = -1 * torch.linalg.norm(sae.D, ord="nuc")
-        nuc_loss = args.nuc * unscaled_nuc_loss
 
         sparsity_loss = args.l1 * unscaled_sparsity_loss
         loss = reconstruction_loss + sparsity_loss
         if args.nuc > 0:
+            unscaled_nuc_loss = -1 * torch.linalg.norm(sae.D, ord="nuc")
+            nuc_loss = args.nuc * unscaled_nuc_loss
             loss += nuc_loss
+            metrics.update(
+                {
+                    "nuc_loss": nuc_loss.item(),
+                    "unscaled_nuc_loss": unscaled_nuc_loss.item(),
+                }
+            )
 
         # only aplicable for orthogonal
         if hasattr(sae, "shear_param") and sae.shear_param is not None:
@@ -100,8 +106,6 @@ def iterate_one_epoch(
 
         metrics.update(
             {
-                "nuc_loss": nuc_loss.item(),
-                "unscaled_nuc_loss": unscaled_nuc_loss.item(),
                 "reconstruction_loss": reconstruction_loss.item(),
                 "unscaled_sparsity_loss": unscaled_sparsity_loss.item(),
                 "sparsity_loss": sparsity_loss.item(),
